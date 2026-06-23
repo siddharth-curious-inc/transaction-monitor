@@ -1,0 +1,51 @@
+name: transaction-monitor-roundup
+
+on:
+  schedule:
+    # GitHub cron is UTC. IST = UTC+5:30.
+    # 11:00 IST = 05:30 UTC, 17:00 IST = 11:30 UTC, 23:00 IST = 17:30 UTC
+    - cron: '30 5,11,17 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print to logs instead of posting to Slack"
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write      # required for Workload Identity Federation
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Authenticate to Google (keyless, WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+        # This writes a short-lived credential file and sets
+        # GOOGLE_APPLICATION_CREDENTIALS, which google.auth.default() picks up.
+
+      - name: Run roundup
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          OTP_CHANNEL_ID: ${{ secrets.OTP_CHANNEL_ID }}
+          SUMMARY_CHANNEL_ID: ${{ secrets.SUMMARY_CHANNEL_ID }}
+          SHEET_ID: ${{ secrets.SHEET_ID }}
+          # GOOGLE_SA_JSON_PATH intentionally unset -> falls back to ADC/WIF
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python src/run.py --dry-run
+          else
+            python src/run.py
+          fi

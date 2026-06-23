@@ -1,0 +1,5 @@
+slack_sdk>=3.27
+google-api-python-client>=2.120
+google-auth>=2.29
+python-dateutil>=2.9
+pytest>=8.0

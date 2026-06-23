@@ -1,0 +1,19 @@
+ OTP Message Detected
+From: AD-ICICIO-T
+Time: 2026-06-23 17:33:17
+Message: 325903 is One-Time Password for INR 554.00 transaction towards Swiggy using ICICI Bank INR Prepaid Card XX6547. OTPs are SECRET. DO NOT disclose
+===
+ OTP Message Detected
+From: AD-ICICIO-T
+Time: 2026-06-23 10:13:49
+Message: 044461 is One-Time Password for INR 581.00 transaction towards INSTAMART using ICICI Bank INR Prepaid Card XX6570. OTPs are SECRET. DO NOT disclose
+===
+ OTP Message Detected
+From: AD-ICICIO-T
+Time: 2026-06-23 09:37:01
+Message: 663214 is One-Time Password for INR 155.00 transaction towards BLINK COMME using ICICI Bank Credit Card XX9005. OTPs are SECRET. DO NOT disclose
+===
+ OTP Message Detected
+From: AD-ICICIO-T
+Time: 2026-06-23 09:39:30
+Message: 663999 is One-Time Password for INR 155.00 transaction towards BLINK COMME using ICICI Bank Credit Card XX9005. OTPs are SECRET. DO NOT disclose
