@@ -10,11 +10,39 @@ def _client():
     return WebClient(token=SLACK_BOT_TOKEN)
 
 
+def _text_from_blocks(blocks):
+    """Pull text out of Block Kit blocks (section / rich_text / context)."""
+    out = []
+    for b in blocks or []:
+        t = b.get("type")
+        if t == "section":
+            txt = b.get("text")
+            if isinstance(txt, dict):
+                out.append(txt.get("text", ""))
+            for f in b.get("fields", []) or []:
+                if isinstance(f, dict):
+                    out.append(f.get("text", ""))
+        elif t == "rich_text":
+            for el in b.get("elements", []) or []:
+                for sub in el.get("elements", []) or []:
+                    if sub.get("type") == "text":
+                        out.append(sub.get("text", ""))
+                    elif sub.get("type") == "link":
+                        out.append(sub.get("text") or sub.get("url", ""))
+        elif t == "context":
+            for el in b.get("elements", []) or []:
+                if isinstance(el, dict):
+                    out.append(el.get("text", ""))
+    return "\n".join(p for p in out if p)
+
+
 def _full_text(msg):
-    """OTP body can live in text and/or attachment fallback."""
+    """OTP body can live in text, attachments, and/or Block Kit blocks."""
     parts = [msg.get("text", "")]
     for att in msg.get("attachments", []) or []:
         parts.append(att.get("text", "") or att.get("fallback", ""))
+        parts.append(_text_from_blocks(att.get("blocks")))
+    parts.append(_text_from_blocks(msg.get("blocks")))
     return "\n".join(p for p in parts if p)
 
 

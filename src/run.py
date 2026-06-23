@@ -36,11 +36,18 @@ def main(dry_run=False):
     now = datetime.now(IST)
 
     raw = fetch_messages_since_midnight()
-    otps = [o for o in (parse_message(t) for t in raw) if o]
-    otps = dedup_retries(otps)
+    parsed = [o for o in (parse_message(t) for t in raw) if o]
+    otps = dedup_retries(parsed)
 
     logged = read_logged_txns(only_date=now.date())
     added, pending = match(otps, logged)
+
+    if dry_run:
+        print(f"[diag] slack messages fetched since 00:00: {len(raw)}")
+        print(f"[diag] parsed as OTPs: {len(parsed)}  "
+              f"(after retry-dedup: {len(otps)})")
+        print(f"[diag] logged rows on {now:%d-%b-%Y} across household tabs: "
+              f"{len(logged)}")
 
     msg = compose(len(otps), added, pending, now)
     post_summary(msg, dry_run=dry_run)
