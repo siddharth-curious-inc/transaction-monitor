@@ -1,6 +1,6 @@
 """Central config. The only file you should normally need to edit."""
 import os
-from datetime import timezone, timedelta
+from datetime import date, timezone, timedelta
 
 # --- timezone ---------------------------------------------------------------
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -123,6 +123,9 @@ MERCHANT_ALIAS = {
 AMOUNT_TOLERANCE = 5.0        # +/- rupees on the amount match
 DEDUP_WINDOW_SECONDS = 600    # collapse same card+amount OTPs within 10 min
 PENDING_LOOKBACK_DAYS = 7     # how many prior days to also surface as pending
+# Never look at dates before this, regardless of the lookback window. The
+# tracker isn't reliable before this date, so older pendings are just noise.
+PENDING_FLOOR_DATE = date(2026, 6, 23)
 
 # A tab counts as a household sheet only if its header row contains ALL of
 # these. Auto-skips Legend / To fix / Master Tracker / exports / etc., and

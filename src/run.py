@@ -1,9 +1,9 @@
 """Entry point. Run:  python src/run.py [--dry-run]"""
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from itertools import groupby
 
-from config import IST, PENDING_LOOKBACK_DAYS
+from config import IST, PENDING_FLOOR_DATE, PENDING_LOOKBACK_DAYS
 from match import dedup_retries, match
 from parse import parse_message
 from sheets import read_logged_txns
@@ -25,16 +25,30 @@ def _context(text):
 _DIVIDER = {"type": "divider"}
 
 
-def _bullets(results, with_household=False):
-    return _section("\n".join(f"• {_fmt(m, with_household)}" for m in results))
+def _cell(text):
+    return {"type": "raw_text", "text": text}
 
 
-def _fmt(mr, with_household=False):
-    o = mr.otp
-    base = f"₹{o.amount:,.2f} · {mr.platform} · {mr.payment_method} · {o.ts:%H:%M}"
-    if with_household and mr.logged is not None:
-        base += f" → {mr.logged.household}"
-    return base
+def _txn_table(results, with_household=False):
+    """A Block Kit table block. Columns: Time | Amount | Platform | Card used,
+    plus a 'Logged for' household column for the logged list."""
+    cols = ["Time", "Amount", "Platform", "Card used"]
+    if with_household:
+        cols.append("Logged for")
+    rows = [[_cell(c) for c in cols]]
+    for m in results:
+        o = m.otp
+        row = [
+            _cell(f"{o.ts:%H:%M}"),
+            _cell(f"₹{o.amount:,.2f}"),
+            _cell(m.platform),
+            _cell(m.payment_method),
+        ]
+        if with_household:
+            row.append(_cell(m.logged.household if m.logged is not None else "—"))
+        rows.append(row)
+    # right-align the Amount column (index 1); leave the rest default-left
+    return {"type": "table", "rows": rows, "column_settings": [None, {"align": "right"}]}
 
 
 def _ordinal(n):
@@ -62,7 +76,7 @@ def compose(detected, added, pending_today, pending_prev, when):
         _section("*⚠️ Pending - Today*"),
     ]
     if pending_today:
-        blocks.append(_bullets(pending_today))
+        blocks.append(_txn_table(pending_today))
     else:
         blocks.append(_context("_Nothing pending - everything today is logged._"))
 
@@ -73,7 +87,7 @@ def compose(detected, added, pending_today, pending_prev, when):
         for day, group in groupby(by_day, key=lambda m: m.otp.ts.date()):
             items = sorted(group, key=lambda m: m.otp.ts)
             blocks.append(_context(f"*{_date_heading(day)}*"))
-            blocks.append(_bullets(items))
+            blocks.append(_txn_table(items))
 
     main_text = (f"OTP → Tracker Roundup: {len(pending_today)} pending today, "
                  f"{len(pending_prev)} pending from previous dates")
@@ -81,7 +95,7 @@ def compose(detected, added, pending_today, pending_prev, when):
 
     reply = None
     if added:
-        reply_blocks = [_section("*✅ Logged*"), _bullets(added, with_household=True)]
+        reply_blocks = [_section("*✅ Logged*"), _txn_table(added, with_household=True)]
         reply = (reply_blocks, f"Logged {len(added)} transaction(s) in the tracker")
     return main, reply
 
@@ -89,8 +103,9 @@ def compose(detected, added, pending_today, pending_prev, when):
 def main(dry_run=False):
     now = datetime.now(IST)
     today = now.date()
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
-        days=PENDING_LOOKBACK_DAYS)
+    # rolling lookback, but never earlier than the configured floor date
+    start_date = max(today - timedelta(days=PENDING_LOOKBACK_DAYS), PENDING_FLOOR_DATE)
+    start = datetime.combine(start_date, time.min, tzinfo=IST)
 
     raw = fetch_messages_since(start)
     parsed = [o for o in (parse_message(t) for t in raw) if o]

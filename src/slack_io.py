@@ -63,6 +63,19 @@ def fetch_messages_since(start):
     return texts
 
 
+def _cell_text(cell):
+    if not cell:
+        return ""
+    ct = cell.get("type")
+    if ct == "raw_text":
+        return cell.get("text", "")
+    if ct == "raw_number":
+        return str(cell.get("number", ""))
+    if ct == "rich_text":
+        return _text_from_blocks([cell])
+    return ""
+
+
 def _blocks_to_text(blocks):
     """Flatten Block Kit blocks into readable text for dry-run / logs."""
     out = []
@@ -70,12 +83,13 @@ def _blocks_to_text(blocks):
         t = b.get("type")
         if t == "divider":
             out.append("─" * 40)
-        elif t == "header":
-            out.append(b["text"]["text"])
-        elif t == "section":
+        elif t in ("header", "section"):
             out.append(b["text"]["text"])
         elif t == "context":
             out.append(" ".join(e["text"] for e in b["elements"]))
+        elif t == "table":
+            for row in b.get("rows", []):
+                out.append(" | ".join(_cell_text(c) for c in row))
     return "\n".join(out)
 
 
