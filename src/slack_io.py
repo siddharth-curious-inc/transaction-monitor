@@ -1,9 +1,7 @@
 """Slack reads and writes via slack_sdk."""
-from datetime import datetime
-
 from slack_sdk import WebClient
 
-from config import IST, OTP_CHANNEL_ID, SLACK_BOT_TOKEN, SUMMARY_CHANNEL_ID
+from config import OTP_CHANNEL_ID, SLACK_BOT_TOKEN, SUMMARY_CHANNEL_ID
 
 
 def _client():
@@ -46,10 +44,8 @@ def _full_text(msg):
     return "\n".join(p for p in parts if p)
 
 
-def fetch_messages_since_midnight():
-    """Return raw OTP message strings posted since 00:00 IST today."""
-    now = datetime.now(IST)
-    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+def fetch_messages_since(start):
+    """Return raw OTP message strings posted at/after the `start` datetime."""
     oldest = start.timestamp()
 
     client = _client()
@@ -67,11 +63,39 @@ def fetch_messages_since_midnight():
     return texts
 
 
-def post_summary(text, dry_run=False):
+def _blocks_to_text(blocks):
+    """Flatten Block Kit blocks into readable text for dry-run / logs."""
+    out = []
+    for b in blocks:
+        t = b.get("type")
+        if t == "divider":
+            out.append("─" * 40)
+        elif t == "header":
+            out.append(b["text"]["text"])
+        elif t == "section":
+            out.append(b["text"]["text"])
+        elif t == "context":
+            out.append(" ".join(e["text"] for e in b["elements"]))
+    return "\n".join(out)
+
+
+def post_summary(main, reply=None, dry_run=False):
+    """`main` and `reply` are (blocks, fallback_text) tuples; `reply` may be None."""
+    main_blocks, main_text = main
     if dry_run:
         print("----- DRY RUN: would post to Slack -----")
-        print(text)
+        print(_blocks_to_text(main_blocks))
+        if reply:
+            print("----- DRY RUN: would post as a threaded reply -----")
+            print(_blocks_to_text(reply[0]))
         print("----------------------------------------")
         return
-    _client().chat_postMessage(
-        channel=SUMMARY_CHANNEL_ID, text=text, unfurl_links=False)
+    client = _client()
+    resp = client.chat_postMessage(
+        channel=SUMMARY_CHANNEL_ID, text=main_text, blocks=main_blocks,
+        unfurl_links=False)
+    if reply:
+        reply_blocks, reply_text = reply
+        client.chat_postMessage(
+            channel=SUMMARY_CHANNEL_ID, text=reply_text, blocks=reply_blocks,
+            thread_ts=resp["ts"], unfurl_links=False)

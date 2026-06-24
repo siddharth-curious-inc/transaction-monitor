@@ -122,6 +122,7 @@ MERCHANT_ALIAS = {
 # --- matching knobs ---------------------------------------------------------
 AMOUNT_TOLERANCE = 5.0        # +/- rupees on the amount match
 DEDUP_WINDOW_SECONDS = 600    # collapse same card+amount OTPs within 10 min
+PENDING_LOOKBACK_DAYS = 7     # how many prior days to also surface as pending
 
 # A tab counts as a household sheet only if its header row contains ALL of
 # these. Auto-skips Legend / To fix / Master Tracker / exports / etc., and

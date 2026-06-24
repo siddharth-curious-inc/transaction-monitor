@@ -65,8 +65,11 @@ def _is_household(header):
     return all(marker in present for marker in HOUSEHOLD_HEADER_MARKERS)
 
 
-def read_logged_txns(only_date: date):
-    """Return all LoggedTxn rows dated `only_date` across household tabs."""
+def read_logged_txns(start_date: date, end_date: date = None):
+    """Return all LoggedTxn rows dated within [start_date, end_date] (inclusive)
+    across household tabs. `end_date` defaults to `start_date` (single day)."""
+    if end_date is None:
+        end_date = start_date
     svc = _service().spreadsheets()
     meta = svc.get(spreadsheetId=SHEET_ID).execute()
     titles = [s["properties"]["title"] for s in meta["sheets"]]
@@ -95,7 +98,7 @@ def read_logged_txns(only_date: date):
             def cell(i):
                 return row[i] if i is not None and i < len(row) else None
             d = _parse_date(cell(di))
-            if d != only_date:
+            if d is None or not (start_date <= d <= end_date):
                 continue
             amt = _parse_amount(cell(ai))
             pm = (cell(mi) or "").strip()
