@@ -47,8 +47,10 @@ def _txn_table(results, with_household=False):
         if with_household:
             row.append(_cell(m.logged.household if m.logged is not None else "—"))
         rows.append(row)
-    # right-align the Amount column (index 1); leave the rest default-left
-    return {"type": "table", "rows": rows, "column_settings": [None, {"align": "right"}]}
+    # right-align the Amount column (index 1); leave the rest default-left.
+    # Slack requires every column_settings entry to be an object, so the
+    # default-styled columns use an empty object ({}) rather than null.
+    return {"type": "table", "rows": rows, "column_settings": [{}, {"align": "right"}]}
 
 
 def _ordinal(n):
