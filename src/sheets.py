@@ -16,7 +16,7 @@ from config import (COL_AMOUNT, COL_DATE, COL_PAYMENT, COL_PLATFORM,
 from match import LoggedTxn
 
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-_NUM_RE = re.compile(r"[-+]?\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?")
+_NUM_RE = re.compile(r"[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?|[-+]?\d+(?:\.\d+)?")
 
 
 def _credentials():
