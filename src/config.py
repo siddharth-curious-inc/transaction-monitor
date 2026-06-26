@@ -1,6 +1,6 @@
 """Central config. The only file you should normally need to edit."""
 import os
-from datetime import date, timezone, timedelta
+from datetime import date, time, timezone, timedelta
 
 # --- timezone ---------------------------------------------------------------
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -118,6 +118,15 @@ MERCHANT_ALIAS = {
     "Zeptonow": "Zepto",
     "bundl techn": "Swiggy - Food",
 }
+
+# --- on-shift Slack user groups to ping in the roundup ----------------------
+# Runs before SHIFT_CUTOFF ping the morning group; runs at/after it (through
+# the day) ping the evening group. The script doesn't know which scheduled run
+# triggered it, so it decides purely from the current IST time -- more resilient
+# than hard-coding the Cloud Scheduler timings.
+SHIFT_CUTOFF = time(14, 0)                       # 2:00 PM IST
+MORNING_GROUP = ("S0AR579HUCD", "5-am-club")     # (user group id, handle)
+EVENING_GROUP = ("S0AR28NAZNX", "2-se-11")
 
 # --- matching knobs ---------------------------------------------------------
 AMOUNT_TOLERANCE = 5.0        # +/- rupees on the amount match

@@ -3,7 +3,9 @@ import sys
 from datetime import datetime, time, timedelta
 from itertools import groupby
 
-from config import IST, PENDING_FLOOR_DATE, PENDING_LOOKBACK_DAYS
+from config import (
+    EVENING_GROUP, IST, MORNING_GROUP, PENDING_FLOOR_DATE,
+    PENDING_LOOKBACK_DAYS, SHIFT_CUTOFF)
 from match import dedup_retries, match
 from parse import parse_message
 from sheets import read_logged_txns
@@ -62,18 +64,29 @@ def _date_heading(d):
     return f"{_ordinal(d.day)} {d:%B}"
 
 
+def _on_shift_group(when):
+    """Slack user-group mention for whoever's on shift at `when` (IST).
+    Runs before the cutoff ping the morning group; everything later in the day
+    pings the evening group. Decided from the clock so it stays correct even if
+    a scheduled run fires off-time."""
+    group_id, handle = MORNING_GROUP if when.time() < SHIFT_CUTOFF else EVENING_GROUP
+    return f"<!subteam^{group_id}|{handle}>"
+
+
 def compose(detected, added, pending_today, pending_prev, when):
     """Build the Block Kit payloads. Returns (main, reply) where each is a
     (blocks, fallback_text) tuple; `reply` is None when nothing was logged.
     The logged list is posted as a thread reply to keep channel-level focus
     on what is still pending."""
+    on_shift = _on_shift_group(when)
     blocks = [
         _header("📊 Credit Card (OTP) → Tracker Roundup"),
         _context(f"{when:%d %b %Y, %-I:%M %p}"),
         _section(
             f"Transactions detected since 00:00 today: *{detected}* (retries deduplicated)\n"
             f"✅ Logged in Finances Tracker: *{len(added)}*\n"
-            f"⚠️ Pending (not yet logged): *{len(pending_today)}*"),
+            f"⚠️ Pending (not yet logged): *{len(pending_today)}*\n"
+            f"On shift: {on_shift}"),
         _DIVIDER,
         _section("*⚠️ Pending - Today*"),
     ]
@@ -92,7 +105,7 @@ def compose(detected, added, pending_today, pending_prev, when):
             blocks.append(_txn_table(items))
 
     main_text = (f"OTP → Tracker Roundup: {len(pending_today)} pending today, "
-                 f"{len(pending_prev)} pending from previous dates")
+                 f"{len(pending_prev)} pending from previous dates — {on_shift}")
     main = (blocks, main_text)
 
     reply = None
