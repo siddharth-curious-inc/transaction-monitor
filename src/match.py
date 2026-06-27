@@ -1,9 +1,14 @@
 """Retry de-duplication and OTP <-> logged-row matching.
 
 Match key (locked):  Date  +  Payment method  +  Amount (+/- tolerance).
-Platform is a TIE-BREAKER only, never a hard requirement.
-Rows are consumed greedily one-to-one so a single logged row can't satisfy
-two OTPs and two OTPs can't both claim one row.
+Platform is a soft signal, not a hard requirement: a same-platform near-exact
+match is preferred, but cross-platform matches are still allowed when nothing
+better competes for the row.
+Rows are consumed one-to-one so a single logged row can't satisfy two OTPs and
+two OTPs can't both claim one row. Assignment is done globally best-first (by
+platform agreement then amount closeness) rather than in OTP time order, so a
+row is awarded to its best claimant instead of whichever OTP happens to be
+processed first.
 """
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -59,24 +64,37 @@ def dedup_retries(otps, window_seconds=DEDUP_WINDOW_SECONDS):
 
 def match(otps, logged, tolerance=AMOUNT_TOLERANCE):
     """Return (added, pending) as two lists of MatchResult."""
-    added, pending = [], []
+    results = {
+        id(o): MatchResult(o, aliased_platform(o),
+                           CARD_TO_PAYMENT_METHOD.get(o.card_last4))
+        for o in otps
+    }
+
+    # Every feasible (otp, row) pairing, ranked so the best pairing wins the row:
+    # same platform first, then the smallest amount difference. Assigning these
+    # globally (rather than per-OTP in time order) stops a worse, earlier OTP
+    # from consuming a row that is a near-exact same-platform match for another.
+    pairs = []
     for o in otps:
         pm = CARD_TO_PAYMENT_METHOD.get(o.card_last4)
-        plat = aliased_platform(o)
-        candidates = [
-            t for t in logged
-            if not t.consumed
-            and pm is not None
-            and t.payment_method == pm
-            and t.date == o.ts.date()
-            and abs(t.amount - o.amount) <= tolerance
-        ]
-        if not candidates:
-            pending.append(MatchResult(o, plat, pm))
+        if pm is None:
             continue
-        # tie-break: prefer a platform match, then the closest amount
-        candidates.sort(key=lambda t: (t.platform != plat, abs(t.amount - o.amount)))
-        chosen = candidates[0]
-        chosen.consumed = True
-        added.append(MatchResult(o, plat, pm, logged=chosen))
+        plat = aliased_platform(o)
+        for t in logged:
+            if (t.payment_method == pm
+                    and t.date == o.ts.date()
+                    and abs(t.amount - o.amount) <= tolerance):
+                pairs.append((t.platform != plat, abs(t.amount - o.amount), o, t))
+    pairs.sort(key=lambda p: (p[0], p[1]))
+
+    for _, _, o, t in pairs:
+        if t.consumed or results[id(o)].logged is not None:
+            continue
+        t.consumed = True
+        results[id(o)].logged = t
+
+    added, pending = [], []
+    for o in otps:
+        res = results[id(o)]
+        (added if res.logged is not None else pending).append(res)
     return added, pending

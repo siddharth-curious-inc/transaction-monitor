@@ -60,6 +60,25 @@ def test_one_row_cannot_satisfy_two_otps():
     assert len(pending) == 1
 
 
+def test_row_goes_to_best_platform_claimant_not_earliest_otp():
+    # Real-world regression: an earlier ZZ73 FirstClub OTP (no row of its own)
+    # must NOT steal the Zomato 71 row that is a near-exact same-platform match
+    # for the later Zomato 71.26 OTP.
+    firstclub = parse_message(
+        "Time: 2026-06-26 06:54:01\nx is OTP for INR 73.00 transaction "
+        "towards FirstClub using ICICI Bank INR Prepaid Card XX6547.")
+    zomato = parse_message(
+        "Time: 2026-06-26 08:15:15\nx is OTP for INR 71.26 transaction "
+        "towards ZOMATO LTD using ICICI Bank INR Prepaid Card XX6547.")
+    logged = [LoggedTxn("Prachii", date(2026, 6, 26), "Zomato", 71.0, "K&D 6547", 10)]
+    added, pending = match([firstclub, zomato], logged)
+    assert len(added) == 1
+    assert added[0].otp is zomato
+    assert added[0].logged.row == 10
+    assert len(pending) == 1
+    assert pending[0].otp is firstclub
+
+
 def test_wrong_date_does_not_match():
     otps = dedup_retries(load_otps())
     logged = [LoggedTxn("Prachii", date(2026, 6, 22), "Swiggy - Food", 554.0, "K&D 6547", 2)]
