@@ -128,6 +128,12 @@ SHIFT_CUTOFF = time(14, 0)                       # 2:00 PM IST
 MORNING_GROUP = ("S0AR579HUCD", "5-am-club")     # (user group id, handle)
 EVENING_GROUP = ("S0AR28NAZNX", "2-se-11")
 
+# --- ops controls -----------------------------------------------------------
+# Ops react to an #otp-bridge message with this emoji to void the transaction
+# (refund, failed attempt, etc.). It's then counted as "excluded" rather than
+# pending, and never needs logging on the tracker.
+EXCLUDE_REACTION = "x"        # the :x: red cross
+
 # --- matching knobs ---------------------------------------------------------
 AMOUNT_TOLERANCE = 5.0        # +/- rupees on the amount match
 DEDUP_WINDOW_SECONDS = 600    # collapse same card+amount OTPs within 10 min

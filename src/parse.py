@@ -17,6 +17,8 @@ class OTP:
     card_last4: str        # "6547"
     ts: datetime           # naive datetime, IST wall-clock from the body
     raw: str               # original full text
+    excluded: bool = False    # ops reacted with :x: to void this transaction
+    exclude_reason: str = ""  # first human thread reply explaining the void
 
 
 def parse_message(text: str):

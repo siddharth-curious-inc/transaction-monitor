@@ -85,3 +85,50 @@ def test_wrong_date_does_not_match():
     added, pending = match(otps, logged)
     assert len(added) == 0
     assert len(pending) == 3
+
+
+def _otp(ts, amount=155.0, card="9005", merchant="BLINK COMME"):
+    o = parse_message(
+        f"Time: {ts}\nx is OTP for INR {amount:.2f} transaction "
+        f"towards {merchant} using ICICI Bank Credit Card XX{card}.")
+    return o
+
+
+def test_x_on_retry_excludes_whole_cluster():
+    # same card+amount 2 min apart = one retry cluster. Ops X the later retry
+    # (the one dedup discards); the surviving anchor must inherit the exclusion
+    # and the reply reason.
+    anchor = _otp("2026-06-23 09:37:01")
+    retry = _otp("2026-06-23 09:39:30")
+    retry.excluded = True
+    retry.exclude_reason = "refund issued"
+
+    deduped = dedup_retries([anchor, retry], window_seconds=600)
+    assert len(deduped) == 1
+    assert deduped[0].excluded is True
+    assert deduped[0].exclude_reason == "refund issued"
+
+
+def test_x_does_not_leak_across_separate_clusters():
+    early = _otp("2026-06-23 09:00:00")
+    late = _otp("2026-06-23 10:00:00")  # 1h later -> its own anchor
+    late.excluded = True
+
+    deduped = sorted(dedup_retries([early, late], window_seconds=600),
+                     key=lambda x: x.ts)
+    assert len(deduped) == 2
+    assert deduped[0].excluded is False
+    assert deduped[1].excluded is True
+
+
+def test_excluded_otp_is_not_pending():
+    excluded = _otp("2026-06-23 11:00:00")
+    excluded.excluded = True
+    active = _otp("2026-06-23 12:00:00", amount=200.0)
+    otps = dedup_retries([excluded, active])
+    # mirror run.main(): excluded OTPs never enter matching
+    to_match = [o for o in otps if not o.excluded]
+    added, pending = match(to_match, [])
+    assert len(added) == 0
+    assert len(pending) == 1
+    assert pending[0].otp.amount == 200.0

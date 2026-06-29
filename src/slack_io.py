@@ -1,7 +1,8 @@
 """Slack reads and writes via slack_sdk."""
 from slack_sdk import WebClient
 
-from config import OTP_CHANNEL_ID, SLACK_BOT_TOKEN, SUMMARY_CHANNEL_ID
+from config import (EXCLUDE_REACTION, OTP_CHANNEL_ID, SLACK_BOT_TOKEN,
+                    SUMMARY_CHANNEL_ID)
 
 
 def _client():
@@ -44,23 +45,56 @@ def _full_text(msg):
     return "\n".join(p for p in parts if p)
 
 
+def _has_exclude_reaction(msg):
+    """True if anyone reacted to the message with the :x: void emoji."""
+    for r in msg.get("reactions", []) or []:
+        if r.get("name") == EXCLUDE_REACTION:
+            return True
+    return False
+
+
+def _first_reply_reason(client, ts):
+    """The first human reply in the thread, used as the void reason. Returns
+    an empty string when the OTP was X'd without an explanatory reply."""
+    resp = client.conversations_replies(channel=OTP_CHANNEL_ID, ts=ts, limit=20)
+    # messages[0] is the OTP message itself; later entries are the replies.
+    for m in resp.get("messages", [])[1:]:
+        if m.get("bot_id") or m.get("subtype") == "bot_message":
+            continue  # only a human's note counts as a reason
+        text = _full_text(m).strip()
+        if text:
+            return text
+    return ""
+
+
 def fetch_messages_since(start):
-    """Return raw OTP message strings posted at/after the `start` datetime."""
+    """Return the OTP messages posted at/after `start` as a list of dicts:
+    ``{"text", "ts", "excluded", "reason"}``. ``excluded`` is True when ops
+    reacted with :x:; ``reason`` is their first threaded reply (or "")."""
     oldest = start.timestamp()
 
     client = _client()
-    texts, cursor = [], None
+    messages, cursor = [], None
     while True:
         resp = client.conversations_history(
             channel=OTP_CHANNEL_ID, oldest=str(oldest),
             limit=200, cursor=cursor)
         for m in resp.get("messages", []):
-            texts.append(_full_text(m))
+            excluded = _has_exclude_reaction(m)
+            reason = ""
+            if excluded and (m.get("reply_count") or 0) > 0:
+                reason = _first_reply_reason(client, m["ts"])
+            messages.append({
+                "text": _full_text(m),
+                "ts": m.get("ts", ""),
+                "excluded": excluded,
+                "reason": reason,
+            })
         if resp.get("has_more"):
             cursor = resp["response_metadata"]["next_cursor"]
         else:
             break
-    return texts
+    return messages
 
 
 def _cell_text(cell):

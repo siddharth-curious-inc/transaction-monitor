@@ -41,9 +41,23 @@ def aliased_platform(otp) -> str:
     return MERCHANT_ALIAS.get(otp.merchant_raw, otp.merchant_raw)
 
 
+def _propagate_exclusion(anchor, cluster):
+    """Ops react to whichever OTP they happen to see, which may be a retry the
+    dedup discarded. So if any OTP in a retry cluster was X'd, the surviving
+    anchor inherits the exclusion (and the first explanatory reply found)."""
+    excluded = [o for o in cluster if o.excluded]
+    if not excluded:
+        return
+    anchor.excluded = True
+    if not anchor.exclude_reason:
+        anchor.exclude_reason = next((o.exclude_reason for o in excluded
+                                      if o.exclude_reason), "")
+
+
 def dedup_retries(otps, window_seconds=DEDUP_WINDOW_SECONDS):
     """Collapse OTPs with the same card+amount fired within `window_seconds`
-    of each other into a single expected transaction (keeps the earliest)."""
+    of each other into a single expected transaction (keeps the earliest).
+    An :x: exclusion on any OTP in a cluster excludes the kept anchor."""
     groups = defaultdict(list)
     for o in otps:
         groups[(o.card_last4, round(o.amount, 2))].append(o)
@@ -52,14 +66,27 @@ def dedup_retries(otps, window_seconds=DEDUP_WINDOW_SECONDS):
     for items in groups.values():
         items.sort(key=lambda x: x.ts)
         anchor = items[0]
+        cluster = [anchor]
         kept.append(anchor)
         for o in items[1:]:
             if (o.ts - anchor.ts).total_seconds() <= window_seconds:
-                continue  # treated as a retry of `anchor`, dropped
+                cluster.append(o)  # treated as a retry of `anchor`, dropped
+                continue
+            _propagate_exclusion(anchor, cluster)
             anchor = o
+            cluster = [anchor]
             kept.append(anchor)
+        _propagate_exclusion(anchor, cluster)
     kept.sort(key=lambda x: x.ts)
     return kept
+
+
+def as_results(otps):
+    """Wrap OTPs as (unmatched) MatchResults for display, e.g. the excluded
+    list which never goes through row matching."""
+    return [MatchResult(o, aliased_platform(o),
+                        CARD_TO_PAYMENT_METHOD.get(o.card_last4))
+            for o in otps]
 
 
 def match(otps, logged, tolerance=AMOUNT_TOLERANCE):

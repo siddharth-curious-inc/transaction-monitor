@@ -2,11 +2,16 @@
 
 Posts a roundup to Slack at 11:00, 17:00 and 23:00 IST: how many card
 transactions were detected in `#otp-bridge` since midnight, which are logged
-in the Finances Tracker, and which are still pending.
+in the Finances Tracker, which are still pending, and which ops have excluded.
 
 ## How matching works
 - One ICICI parser handles all three cards (keyed on card last-4).
 - Retries collapsed: same card + same amount within 10 min = one transaction.
+- **Excluded by ops:** react to an `#otp-bridge` message with :x: to void a
+  transaction (refund, failed attempt, etc.). It's then counted as *excluded*
+  instead of pending and never needs logging. Optionally reply in-thread with a
+  short note — the first human reply becomes the "Reason" in the excluded
+  table. An :x: on *any* message in a retry cluster excludes the whole cluster.
 - Match key: **Date + Payment method + Amount (±₹5)**. Platform is a
   tie-breaker only, so a missing alias never creates a false "pending".
 - Rows are consumed one-to-one (greedy), so counts don't double up.
@@ -27,6 +32,9 @@ merchant alias map (extend from your scraped distinct merchant strings), the
 1. https://api.slack.com/apps → **Create New App** → From scratch → pick your workspace.
 2. **OAuth & Permissions** → Bot Token Scopes: add `channels:history` and
    `chat:write` (use `groups:history` instead if `#otp-bridge` is private).
+   No extra scope is needed for the :x: void reactions — `conversations.history`
+   includes a `reactions` array, and `conversations.replies` (for the reason
+   note) is also covered by `channels:history`.
 3. **Install to Workspace**, copy the **Bot User OAuth Token** (`xoxb-...`).
 4. In Slack, invite the bot to both channels: `/invite @yourbot` in
    `#otp-bridge` and in your new summary channel.
