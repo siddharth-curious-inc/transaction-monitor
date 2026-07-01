@@ -28,7 +28,10 @@ _DIVIDER = {"type": "divider"}
 
 
 def _cell(text):
-    return {"type": "raw_text", "text": text}
+    # Slack rejects empty table cells ("must be more than 0 characters"), so a
+    # blank (an :x: with no reason, or an unmapped card/platform) renders as an
+    # em dash instead of crashing the whole chat.postMessage with invalid_blocks.
+    return {"type": "raw_text", "text": text if text else "—"}
 
 
 def _txn_table(results, with_household=False, with_reason=False):
