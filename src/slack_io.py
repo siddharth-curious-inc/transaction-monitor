@@ -53,6 +53,15 @@ def _has_exclude_reaction(msg):
     return False
 
 
+def _reply_text(msg):
+    """Thread reply body. Prefer the top-level ``text`` field so we don't
+    repeat the same content when Slack also mirrors it in Block Kit blocks."""
+    text = (msg.get("text") or "").strip()
+    if text:
+        return text
+    return _full_text(msg).strip()
+
+
 def _first_reply_reason(client, ts):
     """The first human reply in the thread, used as the void reason. Returns
     an empty string when the OTP was X'd without an explanatory reply."""
@@ -61,7 +70,7 @@ def _first_reply_reason(client, ts):
     for m in resp.get("messages", [])[1:]:
         if m.get("bot_id") or m.get("subtype") == "bot_message":
             continue  # only a human's note counts as a reason
-        text = _full_text(m).strip()
+        text = _reply_text(m)
         if text:
             return text
     return ""

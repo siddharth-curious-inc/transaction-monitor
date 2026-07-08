@@ -123,7 +123,7 @@ def compose(detected, added, pending_today, pending_prev, excluded, when):
 
     reply_blocks = []
     if added:
-        reply_blocks += [_section("*✅ Logged*"),
+        reply_blocks += [_section(f"*✅ Logged today ({when:%d %b %Y})*"),
                          _txn_table(added, with_household=True)]
     if excluded:
         if reply_blocks:
