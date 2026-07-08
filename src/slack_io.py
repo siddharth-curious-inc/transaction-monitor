@@ -62,24 +62,28 @@ def _reply_text(msg):
     return _full_text(msg).strip()
 
 
-def _first_reply_reason(client, ts):
-    """The first human reply in the thread, used as the void reason. Returns
-    an empty string when the OTP was X'd without an explanatory reply."""
+def _thread_replies(client, ts):
+    """All human reply texts in the thread, oldest first. Bot mirrors are
+    skipped so only ops' own notes count."""
     resp = client.conversations_replies(channel=OTP_CHANNEL_ID, ts=ts, limit=20)
     # messages[0] is the OTP message itself; later entries are the replies.
+    out = []
     for m in resp.get("messages", [])[1:]:
         if m.get("bot_id") or m.get("subtype") == "bot_message":
-            continue  # only a human's note counts as a reason
+            continue  # only a human's note counts
         text = _reply_text(m)
         if text:
-            return text
-    return ""
+            out.append(text)
+    return out
 
 
 def fetch_messages_since(start):
     """Return the OTP messages posted at/after `start` as a list of dicts:
-    ``{"text", "ts", "excluded", "reason"}``. ``excluded`` is True when ops
-    reacted with :x:; ``reason`` is their first threaded reply (or "")."""
+    ``{"text", "ts", "excluded", "reason", "comments"}``. ``excluded`` is True
+    when ops reacted with :x:; ``reason`` is the first threaded reply, used as
+    the void explanation (or "" when excluded without one); ``comments`` is
+    every threaded reply joined together (ops' recon notes, e.g. which
+    household a payment was for), or "" when the thread has none."""
     oldest = start.timestamp()
 
     client = _client()
@@ -90,14 +94,15 @@ def fetch_messages_since(start):
             limit=200, cursor=cursor)
         for m in resp.get("messages", []):
             excluded = _has_exclude_reaction(m)
-            reason = ""
-            if excluded and (m.get("reply_count") or 0) > 0:
-                reason = _first_reply_reason(client, m["ts"])
+            replies = []
+            if (m.get("reply_count") or 0) > 0:
+                replies = _thread_replies(client, m["ts"])
             messages.append({
                 "text": _full_text(m),
                 "ts": m.get("ts", ""),
                 "excluded": excluded,
-                "reason": reason,
+                "reason": replies[0] if excluded and replies else "",
+                "comments": "; ".join(replies),
             })
         if resp.get("has_more"):
             cursor = resp["response_metadata"]["next_cursor"]

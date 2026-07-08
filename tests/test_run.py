@@ -52,6 +52,28 @@ def test_no_reply_when_nothing_logged_or_excluded():
     assert reply is None
 
 
+def test_pending_table_shows_comments_column():
+    o = parse_message(
+        "Time: 2026-06-23 09:37:01\nx is OTP for INR 155.00 transaction "
+        "towards BLINK COMME using ICICI Bank Credit Card XX9005.")
+    o.comments = "Prachii household"
+    pending = as_results([o])
+    main, _ = compose(1, [], pending, [], [], WHEN)
+    text = _blocks_to_text(main[0])
+    assert "Comments" in text  # header column present
+    assert "Prachii household" in text
+
+
+def test_pending_table_comments_blank_shows_double_hyphen():
+    o = parse_message(
+        "Time: 2026-06-23 09:37:01\nx is OTP for INR 155.00 transaction "
+        "towards BLINK COMME using ICICI Bank Credit Card XX9005.")
+    pending = as_results([o])
+    main, _ = compose(1, [], pending, [], [], WHEN)
+    text = _blocks_to_text(main[0])
+    assert "--" in text
+
+
 def test_reply_logged_header_includes_today_date():
     o = parse_message(
         "Time: 2026-06-23 09:37:01\nx is OTP for INR 155.00 transaction "

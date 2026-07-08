@@ -34,15 +34,18 @@ def _cell(text):
     return {"type": "raw_text", "text": text if text else "—"}
 
 
-def _txn_table(results, with_household=False, with_reason=False):
+def _txn_table(results, with_household=False, with_reason=False, with_comments=False):
     """A Block Kit table block. Columns: Time | Amount | Platform | Card used,
-    plus a 'Logged for' household column for the logged list, or a 'Reason'
-    column (the ops void note) for the excluded list."""
+    plus a 'Logged for' household column for the logged list, a 'Reason'
+    column (the ops void note) for the excluded list, or a 'Comments' column
+    (every threaded reply, e.g. ops' household note) for the pending lists."""
     cols = ["Time", "Amount", "Platform", "Card used"]
     if with_household:
         cols.append("Logged for")
     if with_reason:
         cols.append("Reason")
+    if with_comments:
+        cols.append("Comments")
     rows = [[_cell(c) for c in cols]]
     for m in results:
         o = m.otp
@@ -57,6 +60,8 @@ def _txn_table(results, with_household=False, with_reason=False):
         if with_reason:
             # left blank when ops X'd without bothering to explain
             row.append(_cell(o.exclude_reason))
+        if with_comments:
+            row.append(_cell(o.comments or "--"))
         rows.append(row)
     # right-align the Amount column (index 1); leave the rest default-left.
     # Slack requires every column_settings entry to be an object, so the
@@ -104,7 +109,7 @@ def compose(detected, added, pending_today, pending_prev, excluded, when):
         _section("*⚠️ Pending - Today*"),
     ]
     if pending_today:
-        blocks.append(_txn_table(pending_today))
+        blocks.append(_txn_table(pending_today, with_comments=True))
     else:
         blocks.append(_context("_Nothing pending - everything today is logged._"))
 
@@ -115,7 +120,7 @@ def compose(detected, added, pending_today, pending_prev, excluded, when):
         for day, group in groupby(by_day, key=lambda m: m.otp.ts.date()):
             items = sorted(group, key=lambda m: m.otp.ts)
             blocks.append(_context(f"*{_date_heading(day)}*"))
-            blocks.append(_txn_table(items))
+            blocks.append(_txn_table(items, with_comments=True))
 
     main_text = (f"OTP → Tracker Roundup: {len(pending_today)} pending today, "
                  f"{len(pending_prev)} pending from previous dates — {on_shift}")
@@ -154,6 +159,7 @@ def main(dry_run=False):
             continue
         o.excluded = msg["excluded"]
         o.exclude_reason = msg["reason"]
+        o.comments = msg["comments"]
         parsed.append(o)
     otps = dedup_retries(parsed)
 

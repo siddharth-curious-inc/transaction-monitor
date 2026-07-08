@@ -54,6 +54,14 @@ def _propagate_exclusion(anchor, cluster):
                                       if o.exclude_reason), "")
 
 
+def _propagate_comments(anchor, cluster):
+    """Same reasoning as exclusion: ops may reply on whichever retry they
+    see, so the surviving anchor inherits the first non-empty reply digest
+    found anywhere in the cluster."""
+    if not anchor.comments:
+        anchor.comments = next((o.comments for o in cluster if o.comments), "")
+
+
 def dedup_retries(otps, window_seconds=DEDUP_WINDOW_SECONDS):
     """Collapse OTPs with the same card+amount fired within `window_seconds`
     of each other into a single expected transaction (keeps the earliest).
@@ -73,10 +81,12 @@ def dedup_retries(otps, window_seconds=DEDUP_WINDOW_SECONDS):
                 cluster.append(o)  # treated as a retry of `anchor`, dropped
                 continue
             _propagate_exclusion(anchor, cluster)
+            _propagate_comments(anchor, cluster)
             anchor = o
             cluster = [anchor]
             kept.append(anchor)
         _propagate_exclusion(anchor, cluster)
+        _propagate_comments(anchor, cluster)
     kept.sort(key=lambda x: x.ts)
     return kept
 

@@ -12,6 +12,11 @@ in the Finances Tracker, which are still pending, and which ops have excluded.
   instead of pending and never needs logging. Optionally reply in-thread with a
   short note — the first human reply becomes the "Reason" in the excluded
   table. An :x: on *any* message in a retry cluster excludes the whole cluster.
+- **Comments:** any thread replies on an `#otp-bridge` message (e.g. ops
+  tagging which household a payment was for, for recon) show up in the
+  "Comments" column of the pending tables, so it's still on record even if
+  ops forget to add it to the tracker itself. Multiple replies are joined
+  together; no reply shows as `--`.
 - Match key: **Date + Payment method + Amount (±₹5)**. Platform is a
   tie-breaker only, so a missing alias never creates a false "pending".
 - Rows are consumed one-to-one (greedy), so counts don't double up.
@@ -34,7 +39,7 @@ merchant alias map (extend from your scraped distinct merchant strings), the
    `chat:write` (use `groups:history` instead if `#otp-bridge` is private).
    No extra scope is needed for the :x: void reactions — `conversations.history`
    includes a `reactions` array, and `conversations.replies` (for the reason
-   note) is also covered by `channels:history`.
+   note and thread comments) is also covered by `channels:history`.
 3. **Install to Workspace**, copy the **Bot User OAuth Token** (`xoxb-...`).
 4. In Slack, invite the bot to both channels: `/invite @yourbot` in
    `#otp-bridge` and in your new summary channel.

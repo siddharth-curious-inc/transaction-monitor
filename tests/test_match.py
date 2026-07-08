@@ -121,6 +121,30 @@ def test_x_does_not_leak_across_separate_clusters():
     assert deduped[1].excluded is True
 
 
+def test_comment_on_retry_propagates_to_anchor():
+    # ops reply "Prachii" on whichever retry they happen to see; the surviving
+    # anchor must inherit that note even if it landed on the discarded retry.
+    anchor = _otp("2026-06-23 09:37:01")
+    retry = _otp("2026-06-23 09:39:30")
+    retry.comments = "Prachii"
+
+    deduped = dedup_retries([anchor, retry], window_seconds=600)
+    assert len(deduped) == 1
+    assert deduped[0].comments == "Prachii"
+
+
+def test_comment_does_not_leak_across_separate_clusters():
+    early = _otp("2026-06-23 09:00:00")
+    late = _otp("2026-06-23 10:00:00")  # 1h later -> its own anchor
+    late.comments = "Shonik"
+
+    deduped = sorted(dedup_retries([early, late], window_seconds=600),
+                     key=lambda x: x.ts)
+    assert len(deduped) == 2
+    assert deduped[0].comments == ""
+    assert deduped[1].comments == "Shonik"
+
+
 def test_excluded_otp_is_not_pending():
     excluded = _otp("2026-06-23 11:00:00")
     excluded.excluded = True
