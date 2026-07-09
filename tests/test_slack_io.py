@@ -24,6 +24,11 @@ def test_reply_text_does_not_duplicate_text_and_blocks():
     assert _reply_text(msg) == "Disha Anirudh"
 
 
+def test_reply_text_unescapes_html_entities():
+    msg = {"text": "Foo &amp; Bar household"}
+    assert _reply_text(msg) == "Foo & Bar household"
+
+
 def test_reply_text_falls_back_to_blocks_when_text_empty():
     msg = {
         "text": "",

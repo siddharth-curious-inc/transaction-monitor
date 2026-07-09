@@ -1,4 +1,6 @@
 """Slack reads and writes via slack_sdk."""
+import html
+
 from slack_sdk import WebClient
 
 from config import (EXCLUDE_REACTION, OTP_CHANNEL_ID, SLACK_BOT_TOKEN,
@@ -57,9 +59,9 @@ def _reply_text(msg):
     """Thread reply body. Prefer the top-level ``text`` field so we don't
     repeat the same content when Slack also mirrors it in Block Kit blocks."""
     text = (msg.get("text") or "").strip()
-    if text:
-        return text
-    return _full_text(msg).strip()
+    if not text:
+        text = _full_text(msg).strip()
+    return html.unescape(text)
 
 
 def _thread_replies(client, ts):
