@@ -2,13 +2,20 @@
 import html
 
 from slack_sdk import WebClient
+from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
 
 from config import (EXCLUDE_REACTION, OTP_CHANNEL_ID, SLACK_BOT_TOKEN,
                     SUMMARY_CHANNEL_ID)
 
 
 def _client():
-    return WebClient(token=SLACK_BOT_TOKEN)
+    # Reading the full backlog since the floor date makes a conversations.replies
+    # call per threaded message, which on a large backlog trips Slack's Tier-3
+    # rate limit (429 'ratelimited'). This handler waits out the server's
+    # Retry-After and retries the call instead of crashing the whole run.
+    client = WebClient(token=SLACK_BOT_TOKEN)
+    client.retry_handlers.append(RateLimitErrorRetryHandler(max_retry_count=5))
+    return client
 
 
 def team_base_url():
