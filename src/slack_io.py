@@ -2,13 +2,40 @@
 import html
 
 from slack_sdk import WebClient
+from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
 
 from config import (EXCLUDE_REACTION, OTP_CHANNEL_ID, SLACK_BOT_TOKEN,
                     SUMMARY_CHANNEL_ID)
 
 
 def _client():
-    return WebClient(token=SLACK_BOT_TOKEN)
+    # Reading the full backlog since the floor date makes a conversations.replies
+    # call per threaded message, which on a large backlog trips Slack's Tier-3
+    # rate limit (429 'ratelimited'). This handler waits out the server's
+    # Retry-After and retries the call instead of crashing the whole run.
+    client = WebClient(token=SLACK_BOT_TOKEN)
+    client.retry_handlers.append(RateLimitErrorRetryHandler(max_retry_count=5))
+    return client
+
+
+def team_base_url():
+    """Workspace base URL (e.g. 'https://curious.slack.com/'), fetched once per
+    run via auth.test. Used to build OTP message permalinks locally so we don't
+    make a chat.getPermalink call per pending row. Returns '' if unavailable."""
+    try:
+        url = _client().auth_test().get("url", "")
+    except Exception:
+        return ""
+    return url if url.endswith("/") else url + "/"
+
+
+def permalink(base_url, ts):
+    """Deep link to an #otp-bridge message from its Slack `ts`. Slack archive
+    links use the ts with the dot removed, prefixed with 'p'. Returns '' when
+    the base URL or ts is missing."""
+    if not base_url or not ts:
+        return ""
+    return f"{base_url}archives/{OTP_CHANNEL_ID}/p{ts.replace('.', '')}"
 
 
 def _text_from_blocks(blocks):

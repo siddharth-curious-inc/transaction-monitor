@@ -137,10 +137,23 @@ EXCLUDE_REACTION = "x"        # the :x: red cross
 # --- matching knobs ---------------------------------------------------------
 AMOUNT_TOLERANCE = 5.0        # +/- rupees on the amount match
 DEDUP_WINDOW_SECONDS = 600    # collapse same card+amount OTPs within 10 min
-PENDING_LOOKBACK_DAYS = 7     # how many prior days to also surface as pending
-# Never look at dates before this, regardless of the lookback window. The
-# tracker isn't reliable before this date, so older pendings are just noise.
+PENDING_LOOKBACK_DAYS = 7     # (legacy) prior-days window; superseded by the
+                              # floor date below now that the full backlog lives
+                              # on the pending sheet rather than in the Slack message.
+# Never look at dates before this. The tracker isn't reliable before this date,
+# so older pendings are just noise. This is also the start of the full pending
+# backlog written to the pending sheet each run.
 PENDING_FLOOR_DATE = date(2026, 6, 23)
+
+# --- pending backlog sheet --------------------------------------------------
+# A dedicated, ops-facing tab on the SAME Finances Tracker workbook (SHEET_ID)
+# that the bot overwrites every run with the full set of still-pending
+# transactions since PENDING_FLOOR_DATE. The Slack roundup only shows Today +
+# Yesterday and links here for the rest. gid identifies the tab; the tab title
+# is resolved from the gid at write time so a rename doesn't break anything.
+# The URL itself is built below from SHEET_ID (not hardcoded here) so there's
+# one source of truth for the workbook ID.
+PENDING_SHEET_GID = 2073293626
 
 # A tab counts as a household sheet only if its header row contains ALL of
 # these. Auto-skips Legend / To fix / Master Tracker / exports / etc., and
@@ -158,4 +171,7 @@ SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 OTP_CHANNEL_ID = os.environ.get("OTP_CHANNEL_ID", "")        # #otp-bridge
 SUMMARY_CHANNEL_ID = os.environ.get("SUMMARY_CHANNEL_ID", "")  # roundup channel
 SHEET_ID = os.environ.get("SHEET_ID", "")
+PENDING_SHEET_URL = (
+    f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
+    f"?gid={PENDING_SHEET_GID}#gid={PENDING_SHEET_GID}") if SHEET_ID else ""
 GOOGLE_SA_JSON_PATH = os.environ.get("GOOGLE_SA_JSON_PATH", "")  # empty -> ADC/WIF
