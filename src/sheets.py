@@ -1,7 +1,9 @@
-"""Read the Finances Tracker via the Sheets API (service account, read-only).
+"""Read the Finances Tracker and write the pending-backlog tab via the Sheets
+API (service account).
 
 Household tabs are auto-detected by their header row, so newly cloned
-households are picked up with no code change and junk tabs are skipped.
+households are picked up with no code change and junk tabs are skipped. The
+pending tab (PENDING_SHEET_GID) is overwritten on every run.
 """
 import os
 import re
@@ -12,10 +14,18 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 from config import (COL_AMOUNT, COL_DATE, COL_PAYMENT, COL_PLATFORM,
-                    GOOGLE_SA_JSON_PATH, HOUSEHOLD_HEADER_MARKERS, SHEET_ID)
+                    GOOGLE_SA_JSON_PATH, HOUSEHOLD_HEADER_MARKERS,
+                    PENDING_SHEET_GID, SHEET_ID)
 from match import LoggedTxn
+from slack_io import permalink
 
-SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+# Read + write. The service account is shared on the workbook as Editor; reads
+# (household tabs) and the pending-tab overwrite both use this single scope.
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+PENDING_SHEET_HEADER = [
+    "Date", "Time", "Amount", "Platform", "Card used", "Comments",
+    "Transaction source"]
 _NUM_RE = re.compile(r"[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?|[-+]?\d+(?:\.\d+)?")
 
 
@@ -113,3 +123,55 @@ def read_logged_txns(start_date: date, end_date: date = None):
                 row=r_idx,
             ))
     return out
+
+
+def _hyperlink(url, label):
+    """A Sheets HYPERLINK formula (USER_ENTERED). Doubles any quotes in the URL
+    so a stray quote can't break out of the formula. Falls back to a plain
+    label when there's no URL."""
+    if not url:
+        return label
+    return f'=HYPERLINK("{url.replace(chr(34), chr(34) * 2)}", "{label}")'
+
+
+def build_pending_sheet_rows(pending_results, base_url):
+    """Header + one row per pending transaction for the pending tab, sorted
+    oldest-first (an aging worklist: the most overdue pending is at the top).
+
+    Columns: Date | Time | Amount | Platform | Card used | Comments |
+    Transaction source (a hyperlink to the originating #otp-bridge message)."""
+    rows = [list(PENDING_SHEET_HEADER)]
+    for m in sorted(pending_results, key=lambda r: r.otp.ts):
+        o = m.otp
+        rows.append([
+            f"{o.ts:%d-%b-%Y}",
+            f"{o.ts:%H:%M}",
+            f"₹{o.amount:,.2f}",
+            m.platform or "",
+            m.payment_method or "",
+            o.comments or "",
+            _hyperlink(permalink(base_url, o.slack_ts), "OTP message"),
+        ])
+    return rows
+
+
+def _pending_tab_title(svc):
+    """Resolve PENDING_SHEET_GID to its current tab title so a rename of the
+    tab doesn't break the write. Raises if the gid isn't in the workbook."""
+    meta = svc.get(spreadsheetId=SHEET_ID).execute()
+    for s in meta["sheets"]:
+        if s["properties"]["sheetId"] == PENDING_SHEET_GID:
+            return s["properties"]["title"]
+    raise RuntimeError(
+        f"pending sheet gid {PENDING_SHEET_GID} not found in workbook {SHEET_ID}")
+
+
+def write_pending_sheet(rows):
+    """Overwrite the pending tab with `rows` (header + data). Clears the whole
+    A:G range first so rows that got logged since the last run drop off."""
+    svc = _service().spreadsheets()
+    title = _pending_tab_title(svc)
+    svc.values().clear(spreadsheetId=SHEET_ID, range=f"'{title}'!A:G").execute()
+    svc.values().update(
+        spreadsheetId=SHEET_ID, range=f"'{title}'!A1",
+        valueInputOption="USER_ENTERED", body={"values": rows}).execute()

@@ -4,6 +4,12 @@ Posts a roundup to Slack at 11:00, 17:00 and 23:00 IST: how many card
 transactions were detected in `#otp-bridge` since midnight, which are logged
 in the Finances Tracker, which are still pending, and which ops have excluded.
 
+The Slack message only shows **pending today** and **pending yesterday**; the
+full pending backlog (everything still unlogged since the 23-Jun floor date)
+is written to a dedicated, ops-facing **pending tab** on the Finances Tracker
+and overwritten on every run, with each row linking back to its `#otp-bridge`
+OTP message. The Slack message links to that tab.
+
 ## How matching works
 - One ICICI parser handles all three cards (keyed on card last-4).
 - Retries collapsed: same card + same amount within 10 min = one transaction.
@@ -86,8 +92,13 @@ echo "GCP_SA_EMAIL=$SA_EMAIL"
 echo "GCP_WIF_PROVIDER=projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
 ```
 
-Then **share the Finances Tracker workbook with `$SA_EMAIL` as Viewer**, and
-note the Sheet ID (the string in the URL between `/d/` and `/edit`).
+Then **share the Finances Tracker workbook with `$SA_EMAIL` as Editor** (the
+bot now writes the pending tab as well as reading the household tabs; the
+`spreadsheets` scope in `src/sheets.py` is read-write), and note the Sheet ID
+(the string in the URL between `/d/` and `/edit`). The pending tab is
+identified by its gid in `src/config.py` (`PENDING_SHEET_GID`); keep it
+read-only for everyone except the service account so its layout isn't
+disturbed.
 
 ### 3. Repo + secrets
 1. Push this repo to GitHub.
@@ -102,11 +113,17 @@ note the Sheet ID (the string in the URL between `/d/` and `/edit`).
 
 ### 4. Test before going live
 - Local: `pip install -r requirements.txt && python -m pytest tests/ -q`
-- Full pipeline, no posting: `gcloud auth application-default login` once
-  (logs in as you; you already have access to the sheet), set the Slack env
-  vars, then `python src/run.py --dry-run` — reads real Slack + Sheets, prints
-  the message instead of posting.
-- In GitHub: **Actions → transaction-monitor-roundup → Run workflow**, tick `dry_run`.
+- Full pipeline, **no side effects** — `gcloud auth application-default login`
+  once (logs in as you; you already have access to the sheet), set the Slack
+  env vars + `SHEET_ID`, then `python src/run.py --dry-run` — reads real Slack +
+  Sheets and prints both the Slack message *and* the pending-sheet rows it would
+  write, without posting or writing anything.
+- **Write the pending tab only** (inspect it live, no Slack post):
+  `python src/run.py --sheet-only`. Re-run it and confirm rows that got logged
+  in the meantime drop off and new pendings appear.
+- In GitHub: **Actions → transaction-monitor-roundup → Run workflow**, pick the
+  `mode`: `dry_run` (logs only), `sheet_only` (writes the tab, no Slack), or
+  `live`. Cloud Scheduler dispatches with no input, which defaults to `live`.
 - When happy, point `SUMMARY_CHANNEL_ID` at the real channel. The schedule is
   already live once the workflow file is on the default branch.
 

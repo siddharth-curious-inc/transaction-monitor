@@ -1,15 +1,22 @@
-"""Entry point. Run:  python src/run.py [--dry-run]"""
+"""Entry point.
+
+Run modes:
+  python src/run.py                # live: overwrite pending sheet + post to Slack
+  python src/run.py --dry-run      # no side effects: print the Slack message and
+                                   #   the pending-sheet rows that would be written
+  python src/run.py --sheet-only   # overwrite pending sheet only; do NOT post to Slack
+"""
 import sys
 from datetime import datetime, time, timedelta
-from itertools import groupby
 
 from config import (
     EVENING_GROUP, IST, MORNING_GROUP, PENDING_FLOOR_DATE,
-    PENDING_LOOKBACK_DAYS, SHIFT_CUTOFF)
+    PENDING_SHEET_URL, SHIFT_CUTOFF)
 from match import as_results, dedup_retries, match
 from parse import parse_message
-from sheets import read_logged_txns
-from slack_io import fetch_messages_since, post_summary
+from sheets import (build_pending_sheet_rows, read_logged_txns,
+                    write_pending_sheet)
+from slack_io import fetch_messages_since, post_summary, team_base_url
 
 
 def _header(text):
@@ -70,15 +77,6 @@ def _txn_table(results, with_household=False, with_reason=False, with_comments=F
     return {"type": "table", "rows": rows, "column_settings": settings}
 
 
-def _ordinal(n):
-    suffix = "th" if 10 <= n % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
-    return f"{n}{suffix}"
-
-
-def _date_heading(d):
-    return f"{_ordinal(d.day)} {d:%B}"
-
-
 def _on_shift_group(when):
     """Slack user-group mention for whoever's on shift at `when` (IST).
     Runs before the cutoff ping the morning group; everything later in the day
@@ -88,11 +86,15 @@ def _on_shift_group(when):
     return f"<!subteam^{group_id}|{handle}>"
 
 
-def compose(detected, added, pending_today, pending_prev, excluded, when):
+def compose(detected, added, pending_today, pending_yesterday, excluded,
+            total_pending, sheet_url, when):
     """Build the Block Kit payloads. Returns (main, reply) where each is a
     (blocks, fallback_text) tuple; `reply` is None when there's nothing logged
     or excluded to detail. The logged/excluded lists are posted as a thread
-    reply to keep channel-level focus on what is still pending."""
+    reply to keep channel-level focus on what is still pending.
+
+    The main message shows only Today + Yesterday pending; the full backlog
+    (`total_pending` rows) lives on the pending sheet, linked via `sheet_url`."""
     on_shift = _on_shift_group(when)
     blocks = [
         _header("📊 Credit Card (OTP) → Tracker Roundup"),
@@ -102,7 +104,8 @@ def compose(detected, added, pending_today, pending_prev, excluded, when):
         _section(
             f"Transactions detected since 00:00 today: *{detected}* (retries deduplicated)\n"
             f"✅ Logged in Finances Tracker: *{len(added)}*\n"
-            f"⚠️ Pending (not yet logged): *{len(pending_today)}*\n"
+            f"⚠️ Pending today (not yet logged): *{len(pending_today)}*\n"
+            f"🗂 Total still pending (all dates): *{total_pending}*\n"
             f"🚫 Excluded by ops: *{len(excluded)}*\n"
             f"On shift: {on_shift}"),
         _DIVIDER,
@@ -113,17 +116,20 @@ def compose(detected, added, pending_today, pending_prev, excluded, when):
     else:
         blocks.append(_context("_Nothing pending - everything today is logged._"))
 
-    if pending_prev:
-        blocks += [_DIVIDER, _section("*🚨 Pending - Previous Dates*")]
-        # newest date first; within a date keep chronological order
-        by_day = sorted(pending_prev, key=lambda m: m.otp.ts, reverse=True)
-        for day, group in groupby(by_day, key=lambda m: m.otp.ts.date()):
-            items = sorted(group, key=lambda m: m.otp.ts)
-            blocks.append(_context(f"*{_date_heading(day)}*"))
-            blocks.append(_txn_table(items, with_comments=True))
+    blocks += [_DIVIDER, _section("*🚨 Pending - Yesterday*")]
+    if pending_yesterday:
+        items = sorted(pending_yesterday, key=lambda m: m.otp.ts)
+        blocks.append(_txn_table(items, with_comments=True))
+    else:
+        blocks.append(_context("_Nothing pending from yesterday._"))
+
+    blocks += [_DIVIDER, _section(
+        f"🗂 To view *all* pending transactions, <{sheet_url}|click here> "
+        f"(the pending tab on the Finances Tracker, refreshed every run).")]
 
     main_text = (f"OTP → Tracker Roundup: {len(pending_today)} pending today, "
-                 f"{len(pending_prev)} pending from previous dates — {on_shift}")
+                 f"{len(pending_yesterday)} pending yesterday, "
+                 f"{total_pending} total pending — {on_shift}")
     main = (blocks, main_text)
 
     reply_blocks = []
@@ -144,12 +150,13 @@ def compose(detected, added, pending_today, pending_prev, excluded, when):
     return main, reply
 
 
-def main(dry_run=False):
+def main(dry_run=False, sheet_only=False):
     now = datetime.now(IST)
     today = now.date()
-    # rolling lookback, but never earlier than the configured floor date
-    start_date = max(today - timedelta(days=PENDING_LOOKBACK_DAYS), PENDING_FLOOR_DATE)
-    start = datetime.combine(start_date, time.min, tzinfo=IST)
+    yesterday = today - timedelta(days=1)
+    # Read the full backlog since the floor date: the pending sheet holds
+    # everything, and Slack shows only today + yesterday out of it.
+    start = datetime.combine(PENDING_FLOOR_DATE, time.min, tzinfo=IST)
 
     raw = fetch_messages_since(start)
     parsed = []
@@ -160,6 +167,7 @@ def main(dry_run=False):
         o.excluded = msg["excluded"]
         o.exclude_reason = msg["reason"]
         o.comments = msg["comments"]
+        o.slack_ts = msg["ts"]
         parsed.append(o)
     otps = dedup_retries(parsed)
 
@@ -173,9 +181,13 @@ def main(dry_run=False):
 
     added_today = [m for m in added if m.otp.ts.date() == today]
     pending_today = [m for m in pending if m.otp.ts.date() == today]
-    pending_prev = [m for m in pending if m.otp.ts.date() < today]
+    pending_yesterday = [m for m in pending if m.otp.ts.date() == yesterday]
     excluded_today = as_results([o for o in excluded if o.ts.date() == today])
     detected_today = sum(1 for o in otps if o.ts.date() == today)
+
+    # Full pending backlog -> the pending sheet (with source-message links).
+    base_url = team_base_url()
+    sheet_rows = build_pending_sheet_rows(pending, base_url)
 
     if dry_run:
         print(f"[diag] slack messages fetched since {start:%d-%b-%Y}: {len(raw)}")
@@ -183,12 +195,32 @@ def main(dry_run=False):
               f"(after retry-dedup: {len(otps)}, excluded by ops: {len(excluded)})")
         print(f"[diag] logged rows {start:%d-%b} to {today:%d-%b} across "
               f"household tabs: {len(logged)}")
+        print(f"[diag] total pending (all dates): {len(pending)}")
+        print("----- DRY RUN: would overwrite the pending sheet with -----")
+        for r in sheet_rows:
+            print(" | ".join(r))
+        print("-----------------------------------------------------------")
+    else:
+        # live and sheet-only both overwrite the sheet; a Sheets failure is
+        # logged but never blocks the Slack post (the link is static anyway).
+        try:
+            write_pending_sheet(sheet_rows)
+            print(f"[sheet] overwrote pending tab with {len(sheet_rows) - 1} row(s)")
+        except Exception as e:  # noqa: BLE001 - surface, don't crash the run
+            print(f"[sheet] WARNING: pending-sheet write failed: {e}")
+
+    if sheet_only:
+        print("[mode] sheet-only: not posting to Slack")
+        return
 
     main_msg, reply = compose(
-        detected_today, added_today, pending_today, pending_prev,
-        excluded_today, now)
+        detected_today, added_today, pending_today, pending_yesterday,
+        excluded_today, len(pending), PENDING_SHEET_URL, now)
     post_summary(main_msg, reply, dry_run=dry_run)
 
 
 if __name__ == "__main__":
-    main(dry_run="--dry-run" in sys.argv)
+    _dry = "--dry-run" in sys.argv
+    # --dry-run wins if both are passed, so a dry run never has side effects.
+    _sheet_only = "--sheet-only" in sys.argv and not _dry
+    main(dry_run=_dry, sheet_only=_sheet_only)

@@ -8,10 +8,14 @@ on:
   #   - cron: '30 5,11,17 * * *'
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Print to logs instead of posting to Slack"
-        type: boolean
-        default: false
+      mode:
+        description: "Run mode"
+        type: choice
+        default: live
+        options:
+          - live         # overwrite the pending sheet AND post to Slack (normal run)
+          - dry_run      # no side effects: print the Slack message + pending-sheet rows to logs
+          - sheet_only   # overwrite the pending sheet only; do NOT post to Slack (test the sheet)
 
 permissions:
   id-token: write      # required for Workload Identity Federation
@@ -44,9 +48,11 @@ jobs:
           SUMMARY_CHANNEL_ID: ${{ secrets.SUMMARY_CHANNEL_ID }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           # GOOGLE_SA_JSON_PATH intentionally unset -> falls back to ADC/WIF
+          # Cloud Scheduler dispatches with no inputs -> mode defaults to "live".
+          MODE: ${{ inputs.mode || 'live' }}
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            python src/run.py --dry-run
-          else
-            python src/run.py
-          fi
+          case "$MODE" in
+            dry_run)    python src/run.py --dry-run ;;
+            sheet_only) python src/run.py --sheet-only ;;
+            *)          python src/run.py ;;
+          esac

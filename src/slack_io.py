@@ -11,6 +11,26 @@ def _client():
     return WebClient(token=SLACK_BOT_TOKEN)
 
 
+def team_base_url():
+    """Workspace base URL (e.g. 'https://curious.slack.com/'), fetched once per
+    run via auth.test. Used to build OTP message permalinks locally so we don't
+    make a chat.getPermalink call per pending row. Returns '' if unavailable."""
+    try:
+        url = _client().auth_test().get("url", "")
+    except Exception:
+        return ""
+    return url if url.endswith("/") else url + "/"
+
+
+def permalink(base_url, ts):
+    """Deep link to an #otp-bridge message from its Slack `ts`. Slack archive
+    links use the ts with the dot removed, prefixed with 'p'. Returns '' when
+    the base URL or ts is missing."""
+    if not base_url or not ts:
+        return ""
+    return f"{base_url}archives/{OTP_CHANNEL_ID}/p{ts.replace('.', '')}"
+
+
 def _text_from_blocks(blocks):
     """Pull text out of Block Kit blocks (section / rich_text / context)."""
     out = []

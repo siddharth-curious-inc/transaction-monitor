@@ -20,6 +20,7 @@ class OTP:
     excluded: bool = False    # ops reacted with :x: to void this transaction
     exclude_reason: str = ""  # first human thread reply explaining the void
     comments: str = ""        # all human thread replies (e.g. household notes)
+    slack_ts: str = ""        # Slack message ts (for the source-message permalink)
 
 
 def parse_message(text: str):
