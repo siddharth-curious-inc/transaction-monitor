@@ -105,7 +105,6 @@ def compose(detected, added, pending_today, pending_yesterday, excluded,
             f"Transactions detected since 00:00 today: *{detected}* (retries deduplicated)\n"
             f"✅ Logged in Finances Tracker: *{len(added)}*\n"
             f"⚠️ Pending today (not yet logged): *{len(pending_today)}*\n"
-            f"🗂 Total still pending (all dates): *{total_pending}*\n"
             f"🚫 Excluded by ops: *{len(excluded)}*\n"
             f"On shift: {on_shift}"),
         _DIVIDER,
@@ -124,7 +123,8 @@ def compose(detected, added, pending_today, pending_yesterday, excluded,
         blocks.append(_context("_Nothing pending from yesterday._"))
 
     blocks += [_DIVIDER, _section(
-        f"🗂 To view *all* pending transactions, <{sheet_url}|click here> "
+        f"🗂 Total still pending (all time): *{total_pending}*\n"
+        f"To view *all* pending transactions, <{sheet_url}|click here> "
         f"(the pending tab on the Finances Tracker, refreshed every run).")]
 
     main_text = (f"OTP → Tracker Roundup: {len(pending_today)} pending today, "

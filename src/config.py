@@ -151,10 +151,9 @@ PENDING_FLOOR_DATE = date(2026, 6, 23)
 # transactions since PENDING_FLOOR_DATE. The Slack roundup only shows Today +
 # Yesterday and links here for the rest. gid identifies the tab; the tab title
 # is resolved from the gid at write time so a rename doesn't break anything.
+# The URL itself is built below from SHEET_ID (not hardcoded here) so there's
+# one source of truth for the workbook ID.
 PENDING_SHEET_GID = 2073293626
-PENDING_SHEET_URL = (
-    "https://docs.google.com/spreadsheets/d/"
-    "18vUCBuKOugji7FSSf-lzN0IF-5oG3-bQuvVMJFKuqtY/edit?gid=2073293626#gid=2073293626")
 
 # A tab counts as a household sheet only if its header row contains ALL of
 # these. Auto-skips Legend / To fix / Master Tracker / exports / etc., and
@@ -172,4 +171,7 @@ SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
 OTP_CHANNEL_ID = os.environ.get("OTP_CHANNEL_ID", "")        # #otp-bridge
 SUMMARY_CHANNEL_ID = os.environ.get("SUMMARY_CHANNEL_ID", "")  # roundup channel
 SHEET_ID = os.environ.get("SHEET_ID", "")
+PENDING_SHEET_URL = (
+    f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit"
+    f"?gid={PENDING_SHEET_GID}#gid={PENDING_SHEET_GID}") if SHEET_ID else ""
 GOOGLE_SA_JSON_PATH = os.environ.get("GOOGLE_SA_JSON_PATH", "")  # empty -> ADC/WIF

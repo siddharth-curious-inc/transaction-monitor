@@ -93,7 +93,7 @@ def test_main_message_links_to_pending_sheet():
     main, _ = compose(0, [], [], [], [], 42, SHEET_URL, WHEN)
     text = _blocks_to_text(main[0])
     assert SHEET_URL in text                     # hyperlink to the sheet present
-    assert "Total still pending (all dates): *42*" in text
+    assert "Total still pending (all time): *42*" in text
     assert "Pending - Yesterday" in text         # yesterday table replaces the
     assert "Previous Dates" not in text          # old per-date grouping
 
