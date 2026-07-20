@@ -6,11 +6,29 @@ from datetime import date, time, timezone, timedelta
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # --- card last-4  ->  sheet "Payment method" dropdown value -----------------
+# LEGACY (OTP source of truth). Only the three credit/prepaid cards fire OTPs.
 CARD_TO_PAYMENT_METHOD = {
     "6547": "K&D 6547",
     "6570": "K&P 6570",
     "9005": "ICICI 9005",
 }
+
+# --- account/card last-4 in the SMS body  ->  "Payment method" dropdown ------
+# NEW source of truth (#transaction-bridge debit confirmations). The rail is
+# identified from the last-4 in the SMS body (never from the forwarding phone),
+# and the last-4 is unique per rail, so a single flat map covers UPI (CashBook/
+# Obopay) and the ICICI cards. Superset of CARD_TO_PAYMENT_METHOD.
+ACCOUNT_TO_PAYMENT_METHOD = {
+    "6679": "Cashbook - Ishita and Harsh",     # CashBook a/c xx6679 (UPI)
+    "0978": "Cashbook - Kabeer and Pallavi",   # CashBook a/c xx0978 (UPI)
+    "6547": "K&D 6547",                          # ICICI INR Prepaid Card XX6547
+    "6570": "K&P 6570",                          # ICICI INR Prepaid Card XX6570
+    "9005": "ICICI 9005",                        # ICICI Credit Card XX9005
+}
+
+# Rails that carry a linkable #otp-bridge OTP (the credit/prepaid cards). UPI
+# rails never fire an OTP, so they get no exclusion/comment linking.
+OTP_LINKED_CARDS = frozenset(CARD_TO_PAYMENT_METHOD)
 
 # --- raw merchant string (exactly as it appears in the OTP) -> sheet Platform
 # Seeded from the three samples. Extend this from your scraped distinct
@@ -135,8 +153,12 @@ EVENING_GROUP = ("S0AR28NAZNX", "2-se-11")
 EXCLUDE_REACTION = "x"        # the :x: red cross
 
 # --- matching knobs ---------------------------------------------------------
-AMOUNT_TOLERANCE = 5.0        # +/- rupees on the amount match
-DEDUP_WINDOW_SECONDS = 600    # collapse same card+amount OTPs within 10 min
+AMOUNT_TOLERANCE = 5.0        # (legacy/OTP) +/- rupees; wobble for pre-auth OTPs
+NEW_AMOUNT_TOLERANCE = 1.0    # (new source) confirmations are exact settled
+                              # amounts, so only a +/-1 rupee rounding cushion.
+DEDUP_WINDOW_SECONDS = 600    # (legacy/OTP) collapse same card+amount within 10 min.
+                              # NOT used for the new source: a debit confirmation
+                              # is one settled transaction, so no retry dedup.
 PENDING_LOOKBACK_DAYS = 7     # (legacy) prior-days window; superseded by the
                               # floor date below now that the full backlog lives
                               # on the pending sheet rather than in the Slack message.
@@ -144,6 +166,22 @@ PENDING_LOOKBACK_DAYS = 7     # (legacy) prior-days window; superseded by the
 # so older pendings are just noise. This is also the start of the full pending
 # backlog written to the pending sheet each run.
 PENDING_FLOOR_DATE = date(2026, 6, 23)
+
+# --- source-of-truth cutover ------------------------------------------------
+# Until this date the source of truth is #otp-bridge (credit-card OTPs). From
+# this date onward it is #transaction-bridge (bank debit confirmations, cards +
+# UPI). The switch is decided from the current IST date, so the changeover is
+# automatic and needs no code change on the day.
+CUTOVER_DATE = date(2026, 7, 21)
+
+# Ignore #transaction-bridge messages before this date -- they're pre-rollout
+# test transactions. Also the start of the freshly-derived new-source backlog;
+# pre-cutover pendings survive via carry-forward on the pending sheet.
+TRANSACTION_FLOOR_DATE = date(2026, 7, 13)
+
+# The emulator test sender. Any #transaction-bridge message whose footer
+# sender-id equals this is skipped at any date.
+TEST_SENDER_ID = "9876543210"
 
 # --- pending backlog sheet --------------------------------------------------
 # A dedicated, ops-facing tab on the SAME Finances Tracker workbook (SHEET_ID)
@@ -168,7 +206,13 @@ COL_PAYMENT = "Payment method"
 
 # --- secrets / ids (from environment) ---------------------------------------
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
-OTP_CHANNEL_ID = os.environ.get("OTP_CHANNEL_ID", "")        # #otp-bridge
+# Channel IDs are NOT secrets (they appear in every message permalink), so they
+# live here as defaults rather than as GitHub secrets -- keeping them out of the
+# secrets set means their values aren't masked as *** in Actions logs, so the
+# permalinks the bot builds are readable and verifiable. An env var still
+# overrides if you ever need to point at a different channel.
+OTP_CHANNEL_ID = os.environ.get("OTP_CHANNEL_ID", "C0ALWS4J0HZ")          # #otp-bridge
+TRANSACTION_CHANNEL_ID = os.environ.get("TRANSACTION_CHANNEL_ID", "C0BGPNTRJLV")  # #transaction-bridge
 SUMMARY_CHANNEL_ID = os.environ.get("SUMMARY_CHANNEL_ID", "")  # roundup channel
 SHEET_ID = os.environ.get("SHEET_ID", "")
 PENDING_SHEET_URL = (

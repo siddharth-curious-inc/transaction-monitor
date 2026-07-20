@@ -7,7 +7,8 @@ pending tab (PENDING_SHEET_GID) is overwritten on every run.
 """
 import os
 import re
-from datetime import date, datetime
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 
 import google.auth
 from google.oauth2 import service_account
@@ -19,14 +20,34 @@ from config import (COL_AMOUNT, COL_DATE, COL_PAYMENT, COL_PLATFORM,
 from match import LoggedTxn
 from slack_io import permalink
 
+# Google Sheets serial-date epoch (1899-12-30). Date cells read back with the
+# FORMULA/UNFORMATTED render option come through as serial day counts.
+_SHEETS_EPOCH = date(1899, 12, 30)
+
 # Read + write. The service account is shared on the workbook as Editor; reads
 # (household tabs) and the pending-tab overwrite both use this single scope.
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 PENDING_SHEET_HEADER = [
-    "Date", "Time", "Amount", "Platform", "Card used", "Comments",
+    "Date", "Time", "Amount", "Platform / Payee", "Payment method", "Comments",
     "Transaction source"]
 _NUM_RE = re.compile(r"[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?|[-+]?\d+(?:\.\d+)?")
+
+
+@dataclass
+class PendingRow:
+    """One pending-tab row in structured form: either freshly derived from a
+    MatchResult (pending_row_from_result) or read back off the sheet for
+    carry-forward (read_pending_sheet). `source_cell` is the ready-to-write
+    "Transaction source" cell -- a HYPERLINK formula or a plain label -- kept
+    verbatim so a carried row preserves its original message link."""
+    date: date
+    time: str            # "HH:MM" for display
+    amount: float
+    platform: str
+    payment_method: str
+    comments: str
+    source_cell: str
 
 
 def _credentials():
@@ -153,6 +174,90 @@ def build_pending_sheet_rows(pending_results, base_url):
             _hyperlink(permalink(base_url, o.slack_ts), "OTP message"),
         ])
     return rows
+
+
+def pending_row_from_result(m, base_url, channel_id):
+    """Turn a freshly-matched pending MatchResult into a PendingRow, linking its
+    "Transaction source" cell to the message in `channel_id`."""
+    o = m.otp
+    return PendingRow(
+        date=o.ts.date(),
+        time=f"{o.ts:%H:%M}",
+        amount=o.amount,
+        platform=m.platform or "",
+        payment_method=m.payment_method or "",
+        comments=o.comments or "",
+        source_cell=_hyperlink(
+            permalink(base_url, o.slack_ts, channel_id), "Transaction msg"),
+    )
+
+
+def render_pending_rows(pending_rows):
+    """Header + one cell-row per PendingRow, sorted oldest-first (aging
+    worklist: most overdue at the top)."""
+    rows = [list(PENDING_SHEET_HEADER)]
+    for r in sorted(pending_rows, key=lambda r: (r.date, r.time)):
+        rows.append([
+            f"{r.date:%d-%b-%Y}",
+            r.time,
+            f"₹{r.amount:,.2f}",
+            r.platform or "",
+            r.payment_method or "",
+            r.comments or "",
+            r.source_cell or "",
+        ])
+    return rows
+
+
+def _cell(row, i):
+    return row[i] if i < len(row) else None
+
+
+def _serial_to_date(v):
+    """Coerce a pending-sheet Date cell to a date: a serial number (how Sheets
+    stores a parsed date) or a displayed/text date string. None if neither."""
+    if isinstance(v, (int, float)):
+        return _SHEETS_EPOCH + timedelta(days=int(v))
+    return _parse_date(v)
+
+
+def read_pending_sheet():
+    """Read the current pending tab back into PendingRows for carry-forward.
+
+    Two passes over the same range: FORMATTED_VALUE for the human display cells
+    (Time/Amount/Platform/Card/Comments) and FORMULA for the Date (as a serial,
+    robust to whatever display format the tab uses) and the Transaction-source
+    cell (to preserve its =HYPERLINK formula, which FORMATTED_VALUE would
+    collapse to just the label). Unparseable rows are skipped."""
+    svc = _service().spreadsheets()
+    title = _pending_tab_title(svc)
+    rng = f"'{title}'!A2:G"
+    disp = svc.values().get(
+        spreadsheetId=SHEET_ID, range=rng,
+        valueRenderOption="FORMATTED_VALUE").execute().get("values", [])
+    form = svc.values().get(
+        spreadsheetId=SHEET_ID, range=rng,
+        valueRenderOption="FORMULA").execute().get("values", [])
+
+    out = []
+    for i, drow in enumerate(disp):
+        frow = form[i] if i < len(form) else []
+        d = _serial_to_date(_cell(frow, 0)) or _parse_date(_cell(drow, 0))
+        amt = _parse_amount(_cell(drow, 2))
+        pm = (_cell(drow, 4) or "").strip()
+        if d is None or amt is None or not pm:
+            continue  # header leftovers / ops-mangled rows aren't carried
+        source = _cell(frow, 6) or _cell(drow, 6) or ""
+        out.append(PendingRow(
+            date=d,
+            time=(_cell(drow, 1) or "").strip(),
+            amount=amt,
+            platform=(_cell(drow, 3) or "").strip(),
+            payment_method=pm,
+            comments=(_cell(drow, 5) or "").strip(),
+            source_cell=source,
+        ))
+    return out
 
 
 def _pending_tab_title(svc):

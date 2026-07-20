@@ -1,8 +1,43 @@
 # transaction-monitor
 
-Posts a roundup to Slack at 11:00, 17:00 and 23:00 IST: how many card
-transactions were detected in `#otp-bridge` since midnight, which are logged
-in the Finances Tracker, which are still pending, and which ops have excluded.
+Posts a roundup to Slack at 11:00, 17:00 and 23:00 IST: how many
+transactions were detected since midnight, which are logged in the Finances
+Tracker, which are still pending, and which ops have excluded.
+
+## Source of truth (cutover 21 Jul 2026)
+
+Until **20 Jul 2026 IST** the source of truth is `#otp-bridge` — credit-card
+OTPs. From **21 Jul 2026 IST** (`CUTOVER_DATE` in `src/config.py`) it switches
+automatically to `#transaction-bridge`, which carries actual **bank debit
+confirmation SMS** (forwarded via Slack Block Kit) for both cards **and** UPI
+(CashBook/Obopay). The switch is decided from the current IST date, so nothing
+needs changing on the day; the legacy OTP pipeline stays in the tree and runs
+untouched before the cutover.
+
+Why switch: an OTP isn't a confirmed transaction (failed/abandoned payments
+still fire one) and UPI never fires an OTP at all — so the OTP feed both
+over- and under-counts. A debit confirmation is a settled transaction.
+
+What changes for the new source:
+- Amount tolerance tightens to **±1** (confirmations are exact settled amounts).
+- **No retry dedup** — two identical same-day debits on one rail are two real
+  transactions (retries only ever affected OTPs).
+- The rail is keyed on the **last-4 in the SMS body** (`ACCOUNT_TO_PAYMENT_METHOD`),
+  never the forwarding phone; this map adds the two CashBook UPI rails.
+- **Ops keep working in `#otp-bridge`**: for a *card* confirmation the bot finds
+  the originating OTP (same last-4 + amount ±1 + date, nearest time) and
+  inherits its `:x:` exclusion and thread comments. UPI has no OTP, so it has no
+  exclusion/comment capture for now.
+- **Carry-forward**: pre-cutover pendings already on the "Unrecorded
+  transactions" tab are re-checked against the household tabs each run — dropped
+  if now logged, kept if not — and merged (deduped on Date + Payment method +
+  Amount) with the freshly derived new-source pendings. Nothing is lost across
+  the switch.
+- Messages before **13 Jul 2026** (`TRANSACTION_FLOOR_DATE`) and any whose
+  footer sender-id is the emulator `9876543210` (`TEST_SENDER_ID`) are ignored.
+
+`python src/run.py --source=transaction` (or `--source=otp`) forces a pipeline
+regardless of the date — handy for testing the new source before the cutover.
 
 The Slack message only shows **pending today** and **pending yesterday**; the
 full pending backlog (everything still unlogged since the 23-Jun floor date)
@@ -47,10 +82,14 @@ merchant alias map (extend from your scraped distinct merchant strings), the
    includes a `reactions` array, and `conversations.replies` (for the reason
    note and thread comments) is also covered by `channels:history`.
 3. **Install to Workspace**, copy the **Bot User OAuth Token** (`xoxb-...`).
-4. In Slack, invite the bot to both channels: `/invite @yourbot` in
-   `#otp-bridge` and in your new summary channel.
+4. In Slack, invite the bot to all channels: `/invite @yourbot` in
+   `#otp-bridge`, `#transaction-bridge`, and your summary channel. (`#otp-bridge`
+   is still needed post-cutover — that's where ops comments for card
+   transactions live.)
 5. Channel IDs: open each channel → channel name → bottom of the popup shows
-   an ID like `C0xxxxxxx`. Grab both.
+   an ID like `C0xxxxxxx`. `#otp-bridge` and `#transaction-bridge` are already
+   set in `src/config.py` (they're not secrets); you only need the summary
+   channel ID for the `SUMMARY_CHANNEL_ID` secret below.
 
 ### 2. Google Sheets API (keyless — Workload Identity Federation)
 Downloadable service-account keys are blocked by org policy, so GitHub
@@ -105,7 +144,6 @@ disturbed.
 2. Repo → **Settings → Secrets and variables → Actions → New repository secret**.
    Add:
    - `SLACK_BOT_TOKEN`   = the `xoxb-...` token
-   - `OTP_CHANNEL_ID`    = `#otp-bridge` channel ID
    - `SUMMARY_CHANNEL_ID`= summary channel ID (point at a **test** channel first)
    - `SHEET_ID`          = the workbook ID
    - `GCP_SA_EMAIL`      = printed by the script above

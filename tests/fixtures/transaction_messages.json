@@ -1,0 +1,71 @@
+[
+  {
+    "_case": "upi_debit_valid",
+    "ts": "1752839021.000100",
+    "blocks": [
+      {"type": "header", "text": {"type": "plain_text", "text": ":money_with_wings: Debit  Rs 82.00  •  Cashbook - Kabeer and Pallavi", "emoji": true}},
+      {"type": "section", "text": {"type": "mrkdwn", "text": "*Raw SMS:*\n```Your a/c xx0978 debited Rs. 82.00 on 18-07-2026 17:33:41. Avl Bal 85653.99. UPI/619917413803/SONU KUMAR PODDAR. Not You? Call 8123275471- CashBook by Obopay```"}},
+      {"type": "section", "fields": [
+        {"type": "mrkdwn", "text": "*Account/Card:*\nCashbook - Kabeer and Pallavi"},
+        {"type": "mrkdwn", "text": "*Amount:*\nRs 82.00"},
+        {"type": "mrkdwn", "text": "*Type:*\nDebit"},
+        {"type": "mrkdwn", "text": "*Merchant:*\nSONU KUMAR PODDAR"},
+        {"type": "mrkdwn", "text": "*Date:*\n18-07-2026"}
+      ]},
+      {"type": "context", "elements": [
+        {"type": "mrkdwn", "text": ":iphone: Kabeer & Pallavi   •   :email: VK-OBOPAY-S   •   :clock3: 2026-07-18 17:33:41"}
+      ]}
+    ]
+  },
+  {
+    "_case": "icici_card_debit_valid",
+    "ts": "1752929599.000200",
+    "blocks": [
+      {"type": "header", "text": {"type": "plain_text", "text": ":money_with_wings: Debit  INR 540.00  •  ICICI 9005", "emoji": true}},
+      {"type": "section", "text": {"type": "mrkdwn", "text": "*Raw SMS:*\n```INR 540.00 spent using ICICI Bank Card XX9005 on 19-Jul-26 on UrbanClap Techn. Avl Limit: INR 4,76,432.47. If not you, call 1800 2662/SMS BLOCK 9005 to 9215676766.```"}},
+      {"type": "section", "fields": [
+        {"type": "mrkdwn", "text": "*Account/Card:*\nICICI 9005"},
+        {"type": "mrkdwn", "text": "*Amount:*\nINR 540.00"},
+        {"type": "mrkdwn", "text": "*Type:*\nDebit"},
+        {"type": "mrkdwn", "text": "*Merchant:*\nUrbanClap Techn"},
+        {"type": "mrkdwn", "text": "*Date:*\n19-Jul-26"}
+      ]},
+      {"type": "context", "elements": [
+        {"type": "kdwn", "text": ":iphone: Kartik & Dhara   •   :email: BT-ICICIT-S   •   :clock3: 2026-07-19 22:43:19"}
+      ]}
+    ]
+  },
+  {
+    "_case": "credit_ignored",
+    "ts": "1752831600.000300",
+    "blocks": [
+      {"type": "header", "text": {"type": "plain_text", "text": ":money_with_wings: Credit  Rs 200.00  •  Cashbook - Ishita and Harsh", "emoji": true}},
+      {"type": "section", "text": {"type": "mrkdwn", "text": "*Raw SMS:*\n```Your a/c xx6679 credited Rs. 200.00 on 18-07-2026 10:00:00. Avl Bal 90000.00. UPI/111222333/REFUND SOURCE. Not You? Call 8123275471- CashBook by Obopay```"}},
+      {"type": "context", "elements": [
+        {"type": "mrkdwn", "text": ":iphone: Ishita & Harsh   •   :email: AD-CBOBPY-S   •   :clock3: 2026-07-18 10:00:00"}
+      ]}
+    ]
+  },
+  {
+    "_case": "test_sender_ignored",
+    "ts": "1752835200.000400",
+    "blocks": [
+      {"type": "header", "text": {"type": "plain_text", "text": ":money_with_wings: Debit  Rs 55.00  •  Cashbook - Ishita and Harsh", "emoji": true}},
+      {"type": "section", "text": {"type": "mrkdwn", "text": "*Raw SMS:*\n```Your a/c xx6679 debited Rs. 55.00 on 18-07-2026 12:00:00. Avl Bal 89000.00. UPI/999888777/TEST PAYEE. Not You? Call 8123275471- CashBook by Obopay```"}},
+      {"type": "context", "elements": [
+        {"type": "mrkdwn", "text": ":iphone: Emulator   •   :email: 9876543210   •   :clock3: 2026-07-18 12:00:00"}
+      ]}
+    ]
+  },
+  {
+    "_case": "pre_floor_ignored",
+    "ts": "1751799944.000500",
+    "blocks": [
+      {"type": "header", "text": {"type": "plain_text", "text": ":money_with_wings: Debit  Rs 1497.00  •  Cashbook - Ishita and Harsh", "emoji": true}},
+      {"type": "section", "text": {"type": "mrkdwn", "text": "*Raw SMS:*\n```Your a/c xx6679 debited Rs. 1497.00 on 06-07-2026 16:45:44. Avl Bal 47965.0. UPI/618716845147/HENNES N MAURITZ. Not You? Call 8123275471- CashBook by Obopay```"}},
+      {"type": "context", "elements": [
+        {"type": "mrkdwn", "text": ":iphone: Ishita & Harsh   •   :email: AD-CBOBPY-S   •   :clock3: 2026-07-06 16:45:44"}
+      ]}
+    ]
+  }
+]
