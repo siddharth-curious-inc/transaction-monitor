@@ -5,7 +5,7 @@ from slack_sdk import WebClient
 from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
 
 from config import (EXCLUDE_REACTION, OTP_CHANNEL_ID, SLACK_BOT_TOKEN,
-                    SUMMARY_CHANNEL_ID)
+                    SUMMARY_CHANNEL_ID, TRANSACTION_CHANNEL_ID)
 
 
 def _client():
@@ -29,13 +29,14 @@ def team_base_url():
     return url if url.endswith("/") else url + "/"
 
 
-def permalink(base_url, ts):
-    """Deep link to an #otp-bridge message from its Slack `ts`. Slack archive
-    links use the ts with the dot removed, prefixed with 'p'. Returns '' when
-    the base URL or ts is missing."""
+def permalink(base_url, ts, channel_id=OTP_CHANNEL_ID):
+    """Deep link to a message from its Slack `ts`. Slack archive links use the
+    ts with the dot removed, prefixed with 'p'. `channel_id` defaults to
+    #otp-bridge (legacy); the new source passes #transaction-bridge. Returns ''
+    when the base URL or ts is missing."""
     if not base_url or not ts:
         return ""
-    return f"{base_url}archives/{OTP_CHANNEL_ID}/p{ts.replace('.', '')}"
+    return f"{base_url}archives/{channel_id}/p{ts.replace('.', '')}"
 
 
 def _text_from_blocks(blocks):
@@ -133,6 +134,31 @@ def fetch_messages_since(start):
                 "reason": replies[0] if excluded and replies else "",
                 "comments": "; ".join(replies),
             })
+        if resp.get("has_more"):
+            cursor = resp["response_metadata"]["next_cursor"]
+        else:
+            break
+    return messages
+
+
+def fetch_transaction_messages_since(start):
+    """Return raw #transaction-bridge message dicts posted at/after `start`,
+    each carrying its Block Kit `blocks` and `ts`. Parsing (raw-SMS extraction,
+    debit filtering, sender-id) is left to `parse.parse_transaction_message` /
+    `parse.transaction_sender_id`.
+
+    Unlike the OTP fetch, this makes no per-message thread/reaction calls: UPI
+    debits carry no ops input, and card confirmations inherit their exclusion +
+    comments from the linked #otp-bridge OTP instead."""
+    oldest = start.timestamp()
+
+    client = _client()
+    messages, cursor = [], None
+    while True:
+        resp = client.conversations_history(
+            channel=TRANSACTION_CHANNEL_ID, oldest=str(oldest),
+            limit=200, cursor=cursor)
+        messages.extend(resp.get("messages", []))
         if resp.get("has_more"):
             cursor = resp["response_metadata"]["next_cursor"]
         else:

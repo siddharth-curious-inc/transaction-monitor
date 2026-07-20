@@ -10,13 +10,17 @@ import sys
 from datetime import datetime, time, timedelta
 
 from config import (
-    EVENING_GROUP, IST, MORNING_GROUP, PENDING_FLOOR_DATE,
-    PENDING_SHEET_URL, SHIFT_CUTOFF)
-from match import as_results, dedup_retries, match
-from parse import parse_message
-from sheets import (build_pending_sheet_rows, read_logged_txns,
+    ACCOUNT_TO_PAYMENT_METHOD, CUTOVER_DATE, EVENING_GROUP, IST, MORNING_GROUP,
+    NEW_AMOUNT_TOLERANCE, PENDING_FLOOR_DATE, PENDING_SHEET_URL, SHIFT_CUTOFF,
+    TEST_SENDER_ID, TRANSACTION_CHANNEL_ID, TRANSACTION_FLOOR_DATE)
+from match import (as_results, dedup_retries, link_to_otps, match,
+                   reconcile_pending)
+from parse import parse_message, parse_transaction_message, transaction_sender_id
+from sheets import (build_pending_sheet_rows, pending_row_from_result,
+                    read_logged_txns, read_pending_sheet, render_pending_rows,
                     write_pending_sheet)
-from slack_io import fetch_messages_since, post_summary, team_base_url
+from slack_io import (fetch_messages_since, fetch_transaction_messages_since,
+                      post_summary, team_base_url)
 
 
 def _header(text):
@@ -150,8 +154,9 @@ def compose(detected, added, pending_today, pending_yesterday, excluded,
     return main, reply
 
 
-def main(dry_run=False, sheet_only=False):
-    now = datetime.now(IST)
+def run_otp_source(now, dry_run=False, sheet_only=False):
+    """LEGACY pipeline: #otp-bridge credit-card OTPs as the source of truth.
+    Kept intact (including retry dedup) for runs before CUTOVER_DATE."""
     today = now.date()
     yesterday = today - timedelta(days=1)
     # Read the full backlog since the floor date: the pending sheet holds
@@ -219,8 +224,135 @@ def main(dry_run=False, sheet_only=False):
     post_summary(main_msg, reply, dry_run=dry_run)
 
 
+def run_transaction_source(now, dry_run=False, sheet_only=False):
+    """NEW pipeline: #transaction-bridge bank debit confirmations (cards + UPI)
+    as the source of truth. No retry dedup (a confirmation is one settled
+    transaction), ±1 amount tolerance, and the pending sheet carries forward
+    unresolved pre-cutover rows so nothing is lost across the switch."""
+    today = now.date()
+    yesterday = today - timedelta(days=1)
+    txn_start = datetime.combine(TRANSACTION_FLOOR_DATE, time.min, tzinfo=IST)
+
+    # 1) parse debit confirmations off #transaction-bridge, dropping the
+    #    emulator test sender, non-debits, and anything before the floor date.
+    raw = fetch_transaction_messages_since(txn_start)
+    confirmations, skipped_sender = [], 0
+    for msg in raw:
+        if transaction_sender_id(msg) == TEST_SENDER_ID:
+            skipped_sender += 1
+            continue
+        o = parse_transaction_message(msg)
+        if not o or o.ts.date() < TRANSACTION_FLOOR_DATE:
+            continue
+        o.slack_ts = msg.get("ts", "")
+        confirmations.append(o)
+
+    # 2) ops still react/reply in #otp-bridge, so link each CARD confirmation
+    #    to its OTP there and inherit that OTP's :x: exclusion + thread comments.
+    otps = []
+    for m in fetch_messages_since(txn_start):
+        po = parse_message(m["text"])
+        if not po:
+            continue
+        po.excluded = m["excluded"]
+        po.exclude_reason = m["reason"]
+        po.comments = m["comments"]
+        po.slack_ts = m["ts"]
+        otps.append(po)
+    link_to_otps(confirmations, otps, tolerance=NEW_AMOUNT_TOLERANCE)
+
+    active = [o for o in confirmations if not o.excluded]
+    excluded = [o for o in confirmations if o.excluded]
+
+    # 3) match active confirmations against the tracker. Read logged rows from
+    #    PENDING_FLOOR_DATE (not the txn floor) so carry-forward reconciliation
+    #    can still resolve old pendings dated before 13 Jul.
+    logged = read_logged_txns(PENDING_FLOOR_DATE, today)
+    added, pending = match(active, logged, tolerance=NEW_AMOUNT_TOLERANCE,
+                           payment_method_map=ACCOUNT_TO_PAYMENT_METHOD)
+
+    # 4) carry forward unresolved pre-cutover rows; dedupe overlap with freshly
+    #    derived rows (prefer the new row for its current link + linked comments).
+    base_url = team_base_url()
+    new_rows = [pending_row_from_result(m, base_url, TRANSACTION_CHANNEL_ID)
+                for m in pending]
+    try:
+        carried = read_pending_sheet()
+    except Exception as e:  # noqa: BLE001 - carry-forward is best-effort
+        carried = []
+        print(f"[sheet] WARNING: could not read pending sheet for "
+              f"carry-forward: {e}")
+    still_old = reconcile_pending(carried, logged, tolerance=NEW_AMOUNT_TOLERANCE)
+    # Drop carried rows that the new source now covers: either re-derived as a
+    # fresh pending, or voided by ops (excluded). Both cases would otherwise
+    # linger as stale duplicates in the overlap window. (Now-logged carried rows
+    # are already dropped by reconcile_pending against the household tabs.)
+    def _key(dt, pm, amt):
+        return (dt, pm, round(amt, 2))
+    drop_keys = {_key(r.date, r.payment_method, r.amount) for r in new_rows}
+    drop_keys |= {_key(o.ts.date(), ACCOUNT_TO_PAYMENT_METHOD.get(o.card_last4),
+                       o.amount) for o in excluded}
+    carried_kept = [r for r in still_old
+                    if _key(r.date, r.payment_method, r.amount) not in drop_keys]
+    merged = new_rows + carried_kept
+    sheet_rows = render_pending_rows(merged)
+
+    added_today = [m for m in added if m.otp.ts.date() == today]
+    pending_today = [m for m in pending if m.otp.ts.date() == today]
+    pending_yesterday = [m for m in pending if m.otp.ts.date() == yesterday]
+    excluded_today = as_results(
+        [o for o in excluded if o.ts.date() == today],
+        payment_method_map=ACCOUNT_TO_PAYMENT_METHOD)
+    detected_today = sum(1 for o in confirmations if o.ts.date() == today)
+
+    if dry_run:
+        print(f"[diag] transaction-bridge messages fetched since "
+              f"{txn_start:%d-%b-%Y}: {len(raw)} "
+              f"(test-sender skipped: {skipped_sender})")
+        print(f"[diag] parsed as debit confirmations: {len(confirmations)} "
+              f"(excluded via linked OTP: {len(excluded)})")
+        print(f"[diag] logged rows {PENDING_FLOOR_DATE:%d-%b} to {today:%d-%b}: "
+              f"{len(logged)}")
+        print(f"[diag] new pending: {len(new_rows)}  carried-forward kept: "
+              f"{len(carried_kept)}  total pending: {len(merged)}")
+        print("----- DRY RUN: would overwrite the pending sheet with -----")
+        for r in sheet_rows:
+            print(" | ".join(r))
+        print("-----------------------------------------------------------")
+    else:
+        try:
+            write_pending_sheet(sheet_rows)
+            print(f"[sheet] overwrote pending tab with {len(sheet_rows) - 1} row(s)")
+        except Exception as e:  # noqa: BLE001 - surface, don't crash the run
+            print(f"[sheet] WARNING: pending-sheet write failed: {e}")
+
+    if sheet_only:
+        print("[mode] sheet-only: not posting to Slack")
+        return
+
+    main_msg, reply = compose(
+        detected_today, added_today, pending_today, pending_yesterday,
+        excluded_today, len(merged), PENDING_SHEET_URL, now)
+    post_summary(main_msg, reply, dry_run=dry_run)
+
+
+def main(dry_run=False, sheet_only=False, source=None):
+    """Dispatch to the active source of truth. `source` forces a pipeline
+    ('otp' or 'transaction') for testing; by default it's decided from the IST
+    date against CUTOVER_DATE, so the switch happens automatically on the day."""
+    now = datetime.now(IST)
+    if source is None:
+        source = "transaction" if now.date() >= CUTOVER_DATE else "otp"
+    if source == "transaction":
+        run_transaction_source(now, dry_run=dry_run, sheet_only=sheet_only)
+    else:
+        run_otp_source(now, dry_run=dry_run, sheet_only=sheet_only)
+
+
 if __name__ == "__main__":
     _dry = "--dry-run" in sys.argv
     # --dry-run wins if both are passed, so a dry run never has side effects.
     _sheet_only = "--sheet-only" in sys.argv and not _dry
-    main(dry_run=_dry, sheet_only=_sheet_only)
+    _source = next((a.split("=", 1)[1] for a in sys.argv[1:]
+                    if a.startswith("--source=")), None)
+    main(dry_run=_dry, sheet_only=_sheet_only, source=_source)

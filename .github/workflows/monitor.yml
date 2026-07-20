@@ -16,6 +16,14 @@ on:
           - live         # overwrite the pending sheet AND post to Slack (normal run)
           - dry_run      # no side effects: print the Slack message + pending-sheet rows to logs
           - sheet_only   # overwrite the pending sheet only; do NOT post to Slack (test the sheet)
+      source:
+        description: "Source of truth (auto = decide from CUTOVER_DATE)"
+        type: choice
+        default: auto
+        options:
+          - auto         # #otp-bridge before CUTOVER_DATE, #transaction-bridge on/after
+          - transaction  # force the new #transaction-bridge pipeline (test before cutover)
+          - otp          # force the legacy #otp-bridge pipeline
 
 permissions:
   id-token: write      # required for Workload Identity Federation
@@ -45,14 +53,23 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           OTP_CHANNEL_ID: ${{ secrets.OTP_CHANNEL_ID }}
+          # #transaction-bridge: source of truth from CUTOVER_DATE onward, and
+          # (pre-cutover-agnostic) the origin of ops comments for card txns.
+          TRANSACTION_CHANNEL_ID: ${{ secrets.TRANSACTION_CHANNEL_ID }}
           SUMMARY_CHANNEL_ID: ${{ secrets.SUMMARY_CHANNEL_ID }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           # GOOGLE_SA_JSON_PATH intentionally unset -> falls back to ADC/WIF
-          # Cloud Scheduler dispatches with no inputs -> mode defaults to "live".
+          # Cloud Scheduler dispatches with no inputs -> mode defaults to "live"
+          # and source to "auto" (date-gated).
           MODE: ${{ inputs.mode || 'live' }}
+          SOURCE: ${{ inputs.source || 'auto' }}
         run: |
+          # "auto" lets run.py decide the source from CUTOVER_DATE; otherwise
+          # force it (e.g. test #transaction-bridge before the cutover date).
+          SRC_FLAG=""
+          if [ "$SOURCE" != "auto" ]; then SRC_FLAG="--source=$SOURCE"; fi
           case "$MODE" in
-            dry_run)    python src/run.py --dry-run ;;
-            sheet_only) python src/run.py --sheet-only ;;
-            *)          python src/run.py ;;
+            dry_run)    python src/run.py --dry-run $SRC_FLAG ;;
+            sheet_only) python src/run.py --sheet-only $SRC_FLAG ;;
+            *)          python src/run.py $SRC_FLAG ;;
           esac

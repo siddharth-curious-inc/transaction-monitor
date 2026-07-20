@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 
 from config import (AMOUNT_TOLERANCE, CARD_TO_PAYMENT_METHOD,
-                    DEDUP_WINDOW_SECONDS, MERCHANT_ALIAS)
+                    DEDUP_WINDOW_SECONDS, MERCHANT_ALIAS, OTP_LINKED_CARDS)
 
 
 @dataclass
@@ -91,19 +91,25 @@ def dedup_retries(otps, window_seconds=DEDUP_WINDOW_SECONDS):
     return kept
 
 
-def as_results(otps):
+def as_results(otps, payment_method_map=CARD_TO_PAYMENT_METHOD):
     """Wrap OTPs as (unmatched) MatchResults for display, e.g. the excluded
     list which never goes through row matching."""
     return [MatchResult(o, aliased_platform(o),
-                        CARD_TO_PAYMENT_METHOD.get(o.card_last4))
+                        payment_method_map.get(o.card_last4))
             for o in otps]
 
 
-def match(otps, logged, tolerance=AMOUNT_TOLERANCE):
-    """Return (added, pending) as two lists of MatchResult."""
+def match(otps, logged, tolerance=AMOUNT_TOLERANCE,
+          payment_method_map=CARD_TO_PAYMENT_METHOD):
+    """Return (added, pending) as two lists of MatchResult.
+
+    `payment_method_map` maps the last-4 to the tracker's "Payment method"
+    value; the legacy OTP source passes CARD_TO_PAYMENT_METHOD, the new
+    #transaction-bridge source passes ACCOUNT_TO_PAYMENT_METHOD (which also
+    covers the UPI rails)."""
     results = {
         id(o): MatchResult(o, aliased_platform(o),
-                           CARD_TO_PAYMENT_METHOD.get(o.card_last4))
+                           payment_method_map.get(o.card_last4))
         for o in otps
     }
 
@@ -113,7 +119,7 @@ def match(otps, logged, tolerance=AMOUNT_TOLERANCE):
     # from consuming a row that is a near-exact same-platform match for another.
     pairs = []
     for o in otps:
-        pm = CARD_TO_PAYMENT_METHOD.get(o.card_last4)
+        pm = payment_method_map.get(o.card_last4)
         if pm is None:
             continue
         plat = aliased_platform(o)
@@ -135,3 +141,64 @@ def match(otps, logged, tolerance=AMOUNT_TOLERANCE):
         res = results[id(o)]
         (added if res.logged is not None else pending).append(res)
     return added, pending
+
+
+def link_to_otps(confirmations, otps, tolerance=AMOUNT_TOLERANCE):
+    """Attach ops input to #transaction-bridge card confirmations by linking
+    each to its originating #otp-bridge OTP.
+
+    Ops keep reacting/replying in #otp-bridge (where they "live"), so a card
+    confirmation inherits the :x: exclusion, void reason and thread comments of
+    the OTP with the same card last-4, amount (within `tolerance`) and date --
+    nearest in time when several qualify. Linking is one-to-one (an OTP feeds at
+    most one confirmation). UPI rails carry no OTP and are left untouched."""
+    pairs = []
+    for c in confirmations:
+        if c.card_last4 not in OTP_LINKED_CARDS:
+            continue
+        for o in otps:
+            if (o.card_last4 == c.card_last4
+                    and o.ts.date() == c.ts.date()
+                    and abs(o.amount - c.amount) <= tolerance):
+                pairs.append((abs((c.ts - o.ts).total_seconds()), c, o))
+    pairs.sort(key=lambda p: p[0])
+
+    linked_c, used_o = set(), set()
+    for _, c, o in pairs:
+        if id(c) in linked_c or id(o) in used_o:
+            continue
+        linked_c.add(id(c))
+        used_o.add(id(o))
+        c.excluded = o.excluded
+        c.exclude_reason = o.exclude_reason
+        c.comments = o.comments
+
+
+def reconcile_pending(carried, logged, tolerance=AMOUNT_TOLERANCE):
+    """Carry-forward reconciliation: given previously-pending rows read back
+    from the pending sheet, return those that are STILL not logged.
+
+    Each carried row already carries its own payment_method/date/amount, so we
+    match directly on that key (no last-4 lookup) against the household rows,
+    consuming rows one-to-one. Uses its own consumption pool, independent of
+    match()'s, because a carried row and a freshly-derived confirmation may be
+    the same real transaction and both legitimately point at the one logged
+    row -- the later dedupe collapses that overlap."""
+    consumed = set()
+    still = []
+    for row in carried:
+        best, best_diff = None, None
+        for t in logged:
+            if id(t) in consumed:
+                continue
+            if (t.payment_method == row.payment_method
+                    and t.date == row.date
+                    and abs(t.amount - row.amount) <= tolerance):
+                diff = abs(t.amount - row.amount)
+                if best is None or diff < best_diff:
+                    best, best_diff = t, diff
+        if best is not None:
+            consumed.add(id(best))  # now logged -> drop from the backlog
+        else:
+            still.append(row)
+    return still
