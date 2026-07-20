@@ -29,7 +29,7 @@ _SHEETS_EPOCH = date(1899, 12, 30)
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 PENDING_SHEET_HEADER = [
-    "Date", "Time", "Amount", "Platform", "Card used", "Comments",
+    "Date", "Time", "Amount", "Platform / Payee", "Payment method", "Comments",
     "Transaction source"]
 _NUM_RE = re.compile(r"[-+]?\d{1,3}(?:,\d{3})+(?:\.\d+)?|[-+]?\d+(?:\.\d+)?")
 

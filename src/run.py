@@ -50,7 +50,7 @@ def _txn_table(results, with_household=False, with_reason=False, with_comments=F
     plus a 'Logged for' household column for the logged list, a 'Reason'
     column (the ops void note) for the excluded list, or a 'Comments' column
     (every threaded reply, e.g. ops' household note) for the pending lists."""
-    cols = ["Time", "Amount", "Platform", "Card used"]
+    cols = ["Time", "Amount", "Platform / Payee", "Payment method"]
     if with_household:
         cols.append("Logged for")
     if with_reason:
@@ -128,8 +128,8 @@ def compose(detected, added, pending_today, pending_yesterday, excluded,
 
     blocks += [_DIVIDER, _section(
         f"🗂 Total still pending (all time): *{total_pending}*\n"
-        f"To view *all* pending transactions, <{sheet_url}|click here> "
-        f"(the pending tab on the Finances Tracker, refreshed every run).")]
+        f"You can view all pending transactions here: "
+        f"<{sheet_url}|Unrecorded transactions – Finance Tracker>")]
 
     main_text = (f"OTP → Tracker Roundup: {len(pending_today)} pending today, "
                  f"{len(pending_yesterday)} pending yesterday, "

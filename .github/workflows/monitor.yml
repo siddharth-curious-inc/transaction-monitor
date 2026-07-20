@@ -52,10 +52,9 @@ jobs:
       - name: Run roundup
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          OTP_CHANNEL_ID: ${{ secrets.OTP_CHANNEL_ID }}
-          # #transaction-bridge: source of truth from CUTOVER_DATE onward, and
-          # (pre-cutover-agnostic) the origin of ops comments for card txns.
-          TRANSACTION_CHANNEL_ID: ${{ secrets.TRANSACTION_CHANNEL_ID }}
+          # OTP_CHANNEL_ID / TRANSACTION_CHANNEL_ID are non-secret channel IDs
+          # and now live in src/config.py, so they're not masked in logs. Set
+          # them here only if you need to override the defaults.
           SUMMARY_CHANNEL_ID: ${{ secrets.SUMMARY_CHANNEL_ID }}
           SHEET_ID: ${{ secrets.SHEET_ID }}
           # GOOGLE_SA_JSON_PATH intentionally unset -> falls back to ADC/WIF

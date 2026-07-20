@@ -87,7 +87,9 @@ merchant alias map (extend from your scraped distinct merchant strings), the
    is still needed post-cutover — that's where ops comments for card
    transactions live.)
 5. Channel IDs: open each channel → channel name → bottom of the popup shows
-   an ID like `C0xxxxxxx`. Grab all three.
+   an ID like `C0xxxxxxx`. `#otp-bridge` and `#transaction-bridge` are already
+   set in `src/config.py` (they're not secrets); you only need the summary
+   channel ID for the `SUMMARY_CHANNEL_ID` secret below.
 
 ### 2. Google Sheets API (keyless — Workload Identity Federation)
 Downloadable service-account keys are blocked by org policy, so GitHub
@@ -142,8 +144,6 @@ disturbed.
 2. Repo → **Settings → Secrets and variables → Actions → New repository secret**.
    Add:
    - `SLACK_BOT_TOKEN`   = the `xoxb-...` token
-   - `OTP_CHANNEL_ID`    = `#otp-bridge` channel ID
-   - `TRANSACTION_CHANNEL_ID` = `#transaction-bridge` channel ID
    - `SUMMARY_CHANNEL_ID`= summary channel ID (point at a **test** channel first)
    - `SHEET_ID`          = the workbook ID
    - `GCP_SA_EMAIL`      = printed by the script above

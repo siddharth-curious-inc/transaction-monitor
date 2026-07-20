@@ -206,8 +206,13 @@ COL_PAYMENT = "Payment method"
 
 # --- secrets / ids (from environment) ---------------------------------------
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
-OTP_CHANNEL_ID = os.environ.get("OTP_CHANNEL_ID", "")        # #otp-bridge (legacy + ops comments)
-TRANSACTION_CHANNEL_ID = os.environ.get("TRANSACTION_CHANNEL_ID", "")  # #transaction-bridge
+# Channel IDs are NOT secrets (they appear in every message permalink), so they
+# live here as defaults rather than as GitHub secrets -- keeping them out of the
+# secrets set means their values aren't masked as *** in Actions logs, so the
+# permalinks the bot builds are readable and verifiable. An env var still
+# overrides if you ever need to point at a different channel.
+OTP_CHANNEL_ID = os.environ.get("OTP_CHANNEL_ID", "C0ALWS4J0HZ")          # #otp-bridge
+TRANSACTION_CHANNEL_ID = os.environ.get("TRANSACTION_CHANNEL_ID", "C0BGPNTRJLV")  # #transaction-bridge
 SUMMARY_CHANNEL_ID = os.environ.get("SUMMARY_CHANNEL_ID", "")  # roundup channel
 SHEET_ID = os.environ.get("SHEET_ID", "")
 PENDING_SHEET_URL = (
