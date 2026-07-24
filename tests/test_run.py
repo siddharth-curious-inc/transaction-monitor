@@ -6,8 +6,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from config import IST  # noqa: E402
 from match import as_results  # noqa: E402
-from parse import parse_message  # noqa: E402
-from run import compose  # noqa: E402
+from parse import OTP, parse_message  # noqa: E402
+from run import apply_bot_exclusions, compose  # noqa: E402
 from slack_io import _blocks_to_text  # noqa: E402
 
 WHEN = datetime(2026, 6, 23, 17, 0, tzinfo=IST)
@@ -102,3 +102,33 @@ def test_yesterday_shows_placeholder_when_empty():
     main, _ = compose(0, [], [], [], [], 0, SHEET_URL, WHEN)
     text = _blocks_to_text(main[0])
     assert "Nothing pending from yesterday." in text
+
+
+def _conf(slack_ts, last4="9005", amount=155.0):
+    return OTP(amount=amount, merchant_raw="BLINK COMME", card_last4=last4,
+               ts=datetime(2026, 7, 20, 10, 0), raw="", slack_ts=slack_ts)
+
+
+def test_bot_exclusion_marks_the_matching_confirmation():
+    c = _conf("111.2")
+    apply_bot_exclusions([c], {"111.2": {"state": "excluded",
+                                         "reason": "refund"}})
+    assert c.excluded is True and c.exclude_reason == "refund"
+
+
+def test_bot_logged_or_pending_state_does_not_exclude():
+    c1, c2 = _conf("a"), _conf("b")
+    apply_bot_exclusions([c1, c2], {"a": {"state": "logged"},
+                                    "b": {"state": "pending"}})
+    assert c1.excluded is False and c2.excluded is False
+
+
+def test_bot_exclusion_never_unsets_a_legacy_x_exclusion():
+    # A confirmation already excluded via an :x:'d OTP (link_to_otps) must stay
+    # excluded even though the bot recorded nothing for it.
+    c = _conf("c")
+    c.excluded = True
+    c.exclude_reason = "voided on OTP"
+    apply_bot_exclusions([c], {})  # no bot state for this ts
+    assert c.excluded is True and c.exclude_reason == "voided on OTP"
+

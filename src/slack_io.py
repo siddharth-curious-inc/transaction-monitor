@@ -4,8 +4,8 @@ import html
 from slack_sdk import WebClient
 from slack_sdk.http_retry.builtin_handlers import RateLimitErrorRetryHandler
 
-from config import (EXCLUDE_REACTION, OTP_CHANNEL_ID, SLACK_BOT_TOKEN,
-                    SUMMARY_CHANNEL_ID, TRANSACTION_CHANNEL_ID)
+from config import (EXCLUDE_REACTION, OTP_CHANNEL_ID, PROMPT_EVENT_TYPE,
+                    SLACK_BOT_TOKEN, SUMMARY_CHANNEL_ID, TRANSACTION_CHANNEL_ID)
 
 
 def _client():
@@ -164,6 +164,73 @@ def fetch_transaction_messages_since(start):
         else:
             break
     return messages
+
+
+def _prompt_state_from_msg(msg):
+    """If `msg` is one of the interactivity bot's prompts, return its
+    (txn_ts, {"state", "household", "reason"}) from the Slack message metadata;
+    otherwise (None, None). The event_payload is flat (a Slack metadata
+    constraint), so no nesting to unpack."""
+    md = msg.get("metadata") or {}
+    if md.get("event_type") != PROMPT_EVENT_TYPE:
+        return None, None
+    p = md.get("event_payload") or {}
+    txn_ts = p.get("txn_ts")
+    if not txn_ts:
+        return None, None
+    return txn_ts, {
+        "state": p.get("state", ""),
+        "household": p.get("household", ""),
+        "reason": p.get("reason", ""),
+        "otp_parent_ts": p.get("otp_parent_ts", ""),
+    }
+
+
+def fetch_bot_prompt_states(start):
+    """Scan #otp-bridge for the interactivity bot's own prompts posted at/after
+    `start` and return ``{txn_ts: {"state", "household", "reason"}}`` keyed by
+    the originating #transaction-bridge message ts.
+
+    Prompts live in two places: standalone (UPI) prompts are top-level messages,
+    while credit-card prompts are threaded replies under the matched OTP. So we
+    read the channel history AND, for any threaded message, its replies -- both
+    with include_all_metadata so the prompt metadata comes back. The scheduled
+    pipeline uses this to learn which #transaction-bridge confirmations ops
+    excluded via the dropdown (the metadata's state == "excluded")."""
+    oldest = str(start.timestamp())
+    client = _client()
+    out, cursor = {}, None
+    while True:
+        resp = client.conversations_history(
+            channel=OTP_CHANNEL_ID, oldest=oldest, limit=200,
+            cursor=cursor, include_all_metadata=True)
+        for m in resp.get("messages", []):
+            txn_ts, state = _prompt_state_from_msg(m)
+            if txn_ts:
+                out[txn_ts] = state
+            if (m.get("reply_count") or 0) > 0:
+                replies = client.conversations_replies(
+                    channel=OTP_CHANNEL_ID, ts=m["ts"], limit=50,
+                    include_all_metadata=True)
+                for r in replies.get("messages", [])[1:]:
+                    r_ts, r_state = _prompt_state_from_msg(r)
+                    if r_ts:
+                        out[r_ts] = r_state
+        if resp.get("has_more"):
+            cursor = resp["response_metadata"]["next_cursor"]
+        else:
+            break
+    return out
+
+
+def add_reaction(channel, ts, name):
+    """Add an emoji reaction (name without colons) to a message. Swallows an
+    'already_reacted' error so a retry after a restart is idempotent."""
+    try:
+        _client().reactions_add(channel=channel, timestamp=ts, name=name)
+    except Exception as e:  # noqa: BLE001
+        if "already_reacted" not in str(e):
+            raise
 
 
 def _cell_text(cell):

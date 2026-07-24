@@ -1,0 +1,54 @@
+name: test-bot-sheets
+
+# Manual test for the interactivity bot's Sheets write path. Local ADC is blocked
+# by org policy, so this exercises list_household_tabs + append_household_row
+# against a SCRATCH workbook/tab using the same keyless WIF auth as the roundup.
+# The interactive Slack loop (post -> click -> update) can't run in CI; that's
+# tested locally. This covers the un-unit-testable half: the real Sheets write.
+#
+# Prereqs: the WIF service account (GCP_SA_EMAIL) must have Editor access to the
+# scratch workbook. Runs pytest first, then the live write.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sheet_id:
+        description: "Scratch workbook id to write to"
+        type: string
+        default: "18vUCBuKOugji7FSSf-lzN0IF-5oG3-bQuvVMJFKuqtY"
+      tab:
+        description: "Scratch household tab to append a test row to"
+        type: string
+        default: "test - Sid"
+
+permissions:
+  id-token: write      # required for Workload Identity Federation
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Unit tests
+        run: python -m pytest -q
+
+      - name: Authenticate to Google (keyless, WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_SA_EMAIL }}
+
+      - name: Live Sheets write smoke test
+        env:
+          SHEET_ID: ${{ inputs.sheet_id }}
+          TEST_HOUSEHOLD_TAB: ${{ inputs.tab }}
+          # GOOGLE_SA_JSON_PATH intentionally unset -> falls back to ADC/WIF
+        run: python tools/sheet_write_smoke.py

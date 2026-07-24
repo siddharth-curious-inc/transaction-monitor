@@ -19,8 +19,9 @@ from parse import parse_message, parse_transaction_message, transaction_sender_i
 from sheets import (build_pending_sheet_rows, pending_row_from_result,
                     read_logged_txns, read_pending_sheet, render_pending_rows,
                     write_pending_sheet)
-from slack_io import (fetch_messages_since, fetch_transaction_messages_since,
-                      post_summary, team_base_url)
+from slack_io import (fetch_bot_prompt_states, fetch_messages_since,
+                      fetch_transaction_messages_since, post_summary,
+                      team_base_url)
 
 
 def _header(text):
@@ -154,6 +155,21 @@ def compose(detected, added, pending_today, pending_yesterday, excluded,
     return main, reply
 
 
+def apply_bot_exclusions(confirmations, bot_states):
+    """Mark confirmations that ops voided via the interactivity bot's dropdown.
+
+    `bot_states` maps a #transaction-bridge ts -> the bot prompt's recorded
+    state (from fetch_bot_prompt_states). A state of "excluded" flags the
+    confirmation just like an :x' on the linked OTP would. OR-only: we never
+    unset an exclusion already inherited from an :x:'d OTP via link_to_otps."""
+    for o in confirmations:
+        st = bot_states.get(o.slack_ts)
+        if st and st.get("state") == "excluded":
+            o.excluded = True
+            if not o.exclude_reason:
+                o.exclude_reason = st.get("reason", "")
+
+
 def run_otp_source(now, dry_run=False, sheet_only=False):
     """LEGACY pipeline: #otp-bridge credit-card OTPs as the source of truth.
     Kept intact (including retry dedup) for runs before CUTOVER_DATE."""
@@ -260,6 +276,21 @@ def run_transaction_source(now, dry_run=False, sheet_only=False):
         po.slack_ts = m["ts"]
         otps.append(po)
     link_to_otps(confirmations, otps, tolerance=NEW_AMOUNT_TOLERANCE)
+
+    # 2b) fold in exclusions ops made via the interactivity bot's dropdown. That
+    #     bot records an exclusion as state=excluded in its own prompt's Slack
+    #     metadata (keyed by the #transaction-bridge ts); this supersedes the
+    #     :x: reaction for NEW transactions. We OR it on top of any :x:-inherited
+    #     exclusion from link_to_otps -- never unset -- so a bot-voided txn drops
+    #     from pending just like an :x:'d one. (The legacy :x: path above still
+    #     runs for old #otp-bridge OTPs, per CLAUDE.md.) Best-effort: a failure
+    #     reading bot metadata must never crash the roundup.
+    try:
+        bot_states = fetch_bot_prompt_states(txn_start)
+    except Exception as e:  # noqa: BLE001
+        bot_states = {}
+        print(f"[bot] WARNING: could not read bot prompt states: {e}")
+    apply_bot_exclusions(confirmations, bot_states)
 
     active = [o for o in confirmations if not o.excluded]
     excluded = [o for o in confirmations if o.excluded]

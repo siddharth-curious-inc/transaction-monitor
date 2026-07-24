@@ -14,9 +14,9 @@ import google.auth
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-from config import (COL_AMOUNT, COL_DATE, COL_PAYMENT, COL_PLATFORM,
-                    GOOGLE_SA_JSON_PATH, HOUSEHOLD_HEADER_MARKERS,
-                    PENDING_SHEET_GID, SHEET_ID)
+from config import (COL_AMOUNT, COL_DATE, COL_PAYMENT, COL_PLATFORM, COL_REMARK,
+                    EXCLUDED_HOUSEHOLD_TABS, GOOGLE_SA_JSON_PATH,
+                    HOUSEHOLD_HEADER_MARKERS, PENDING_SHEET_GID, SHEET_ID)
 from match import LoggedTxn
 from slack_io import permalink
 
@@ -144,6 +144,88 @@ def read_logged_txns(start_date: date, end_date: date = None):
                 row=r_idx,
             ))
     return out
+
+
+def _filter_household_tabs(items):
+    """Pure core of list_household_tabs. `items` is an iterable of
+    (title, header_row); returns qualifying titles sorted alphabetically."""
+    out = [t for t, h in items
+           if h and _is_household(h) and t not in EXCLUDED_HOUSEHOLD_TABS]
+    return sorted(out, key=str.casefold)
+
+
+def list_household_tabs():
+    """Return household tab titles for the interactivity bot's dropdown, sorted
+    alphabetically. A tab qualifies if its header row carries the household
+    markers (same auto-detection as read_logged_txns) AND its title is not in
+    EXCLUDED_HOUSEHOLD_TABS -- the latter drops the "Duplicate me" template and
+    the frozen export tab, which do carry the markers but aren't destinations."""
+    svc = _service().spreadsheets()
+    meta = svc.get(spreadsheetId=SHEET_ID).execute()
+    titles = [s["properties"]["title"] for s in meta["sheets"]]
+    ranges = [f"'{t}'!A1:Z1" for t in titles]
+    resp = svc.values().batchGet(
+        spreadsheetId=SHEET_ID, ranges=ranges,
+        valueRenderOption="FORMATTED_VALUE").execute()
+    items = [(title, (vr.get("values") or [[]])[0])
+             for title, vr in zip(titles, resp.get("valueRanges", []))]
+    return _filter_household_tabs(items)
+
+
+def _household_row_values(header, txn_date, platform, amount, payment_method,
+                          remark=""):
+    """Pure core of append_household_row: given the tab's `header` row, return
+    the cell row to append, aligned so values.append maps it left-to-right from
+    column A. Date is `DD-Mon-YYYY` to match the matcher's `_parse_date`; a
+    mismatch would leave the item pending forever. Amount stays numeric. Columns
+    other than Date/Platform/Amount/Payment method/Remark are left blank for ops.
+    Raises RuntimeError if a matcher-critical column is absent."""
+    idx = {
+        COL_DATE: _col_index(header, COL_DATE),
+        COL_PLATFORM: _col_index(header, COL_PLATFORM),
+        COL_AMOUNT: _col_index(header, COL_AMOUNT),
+        COL_PAYMENT: _col_index(header, COL_PAYMENT),
+        COL_REMARK: _col_index(header, COL_REMARK),
+    }
+    # Date + Amount + Payment method are load-bearing for the matcher; a tab
+    # missing any of them isn't a place we can safely log to.
+    missing = [c for c in (COL_DATE, COL_AMOUNT, COL_PAYMENT) if idx[c] is None]
+    if missing:
+        raise RuntimeError(f"household tab missing column(s) {missing}")
+
+    values = {
+        idx[COL_DATE]: f"{txn_date:%d-%b-%Y}",
+        idx[COL_PLATFORM]: platform or "",
+        idx[COL_AMOUNT]: amount,
+        idx[COL_PAYMENT]: payment_method or "",
+    }
+    if idx[COL_REMARK] is not None and remark:
+        values[idx[COL_REMARK]] = remark
+    width = max(values) + 1
+    return [values.get(i, "") for i in range(width)]
+
+
+def append_household_row(title, txn_date, platform, amount, payment_method,
+                         remark=""):
+    """Append one transaction row to household tab `title` via values.append
+    with INSERT_ROWS -- atomic server-side, so two concurrent ops submissions
+    can't collide on the same target row (no scan-for-empty-row).
+
+    Returns the API response. Raises on any Sheets error (caller surfaces it)."""
+    svc = _service().spreadsheets()
+    header = svc.values().get(
+        spreadsheetId=SHEET_ID, range=f"'{title}'!1:1",
+        valueRenderOption="FORMATTED_VALUE").execute().get("values", [[]])
+    header = header[0] if header else []
+    try:
+        row = _household_row_values(header, txn_date, platform, amount,
+                                    payment_method, remark)
+    except RuntimeError as e:
+        raise RuntimeError(f"{e} on tab {title!r}")
+    return svc.values().append(
+        spreadsheetId=SHEET_ID, range=f"'{title}'!A:Z",
+        valueInputOption="USER_ENTERED", insertDataOption="INSERT_ROWS",
+        body={"values": [row]}).execute()
 
 
 def _hyperlink(url, label):
