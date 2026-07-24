@@ -6,6 +6,7 @@ Run modes:
                                    #   the pending-sheet rows that would be written
   python src/run.py --sheet-only   # overwrite pending sheet only; do NOT post to Slack
 """
+import re
 import sys
 from datetime import datetime, time, timedelta
 
@@ -15,7 +16,8 @@ from config import (
     TEST_SENDER_ID, TRANSACTION_CHANNEL_ID, TRANSACTION_FLOOR_DATE)
 from match import (as_results, dedup_retries, link_to_otps, match,
                    reconcile_pending)
-from parse import parse_message, parse_transaction_message, transaction_sender_id
+from parse import (_raw_sms, parse_message, parse_transaction_message,
+                   transaction_sender_id)
 from sheets import (build_pending_sheet_rows, pending_row_from_result,
                     read_logged_txns, read_pending_sheet, render_pending_rows,
                     write_pending_sheet)
@@ -236,13 +238,19 @@ def run_transaction_source(now, dry_run=False, sheet_only=False):
     # 1) parse debit confirmations off #transaction-bridge, dropping the
     #    emulator test sender, non-debits, and anything before the floor date.
     raw = fetch_transaction_messages_since(txn_start)
-    confirmations, skipped_sender = [], 0
+    confirmations, skipped_sender, unparsed_debits = [], 0, 0
     for msg in raw:
         if transaction_sender_id(msg) == TEST_SENDER_ID:
             skipped_sender += 1
             continue
         o = parse_transaction_message(msg)
         if not o or o.ts.date() < TRANSACTION_FLOOR_DATE:
+            # A message that reads like a debit but didn't parse is a silent
+            # drop (e.g. a new SMS dialect) -- surface it so a whole rail can't
+            # vanish unnoticed, as the ICICI-prepaid cards did before this diag.
+            if o is None and re.search(r"\bdebited\b|\bspent\b",
+                                       _raw_sms(msg), re.I):
+                unparsed_debits += 1
             continue
         o.slack_ts = msg.get("ts", "")
         confirmations.append(o)
@@ -311,6 +319,9 @@ def run_transaction_source(now, dry_run=False, sheet_only=False):
               f"(test-sender skipped: {skipped_sender})")
         print(f"[diag] parsed as debit confirmations: {len(confirmations)} "
               f"(excluded via linked OTP: {len(excluded)})")
+        if unparsed_debits:
+            print(f"[diag] WARNING: {unparsed_debits} debit-like message(s) "
+                  f"could not be parsed (possible new/unhandled SMS dialect)")
         print(f"[diag] logged rows {PENDING_FLOOR_DATE:%d-%b} to {today:%d-%b}: "
               f"{len(logged)}")
         print(f"[diag] new pending: {len(new_rows)}  carried-forward kept: "

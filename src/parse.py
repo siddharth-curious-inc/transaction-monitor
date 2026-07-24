@@ -53,8 +53,18 @@ def parse_message(text: str):
 # "Avl Bal" / "Avl Limit" figures that follow it in the same SMS.
 TXN_AMOUNT_OBOPAY_RE = re.compile(r"debited\s+Rs\.?\s*([\d,]+\.\d{2})", re.I)
 TXN_AMOUNT_ICICI_RE = re.compile(r"INR\s*([\d,]+\.\d{2})\s+spent", re.I)
+# ICICI prepaid card: "Rs 1,020.06 debited from ICICI Bank Prepaid Card 6620 on
+# 24-Jul-26. Info- PORTER. ..." -- a THIRD dialect (K&D/K&P/I&H prepaid cards).
+# The amount is anchored to the trailing "debited" so the later "Available
+# Balance is Rs ..." is never picked up; the last-4 has NO "XX" prefix here
+# (unlike the ICICI credit card); the merchant follows "Info-". Date is
+# DD-Mon-YY (reuses TXN_DATE_ICICI_RE) and, as with the credit card, the body
+# carries no time so it comes from the footer :clock3:.
+TXN_AMOUNT_PREPAID_RE = re.compile(r"Rs\.?\s*([\d,]+\.\d{2})\s+debited", re.I)
 TXN_LAST4_OBOPAY_RE = re.compile(r"a/c\s+xx(\d{4})", re.I)
 TXN_LAST4_ICICI_RE = re.compile(r"Card\s+XX(\d{4})", re.I)
+TXN_LAST4_PREPAID_RE = re.compile(r"Prepaid Card\s+(\d{4})", re.I)
+TXN_MERCHANT_PREPAID_RE = re.compile(r"Info-\s*(.+?)\.", re.I)
 # Obopay: "on 06-07-2026 16:45:44" (DD-MM-YYYY HH:MM:SS)
 TXN_DT_OBOPAY_RE = re.compile(r"on\s+(\d{2}-\d{2}-\d{4})\s+(\d{2}:\d{2}:\d{2})")
 # ICICI: "on 19-Jul-26" (DD-Mon-YY, no time in the SMS body)
@@ -130,7 +140,9 @@ def _field_value(msg, label):
 def _txn_merchant(sms, msg):
     """Best-effort merchant/payee: parsed from the raw SMS (authoritative),
     falling back to the pretty *Merchant:* field."""
-    m = TXN_MERCHANT_UPI_RE.search(sms) or TXN_MERCHANT_ICICI_RE.search(sms)
+    m = (TXN_MERCHANT_UPI_RE.search(sms)
+         or TXN_MERCHANT_ICICI_RE.search(sms)
+         or TXN_MERCHANT_PREPAID_RE.search(sms))
     if m:
         return m.group(1).strip()
     return _field_value(msg, "Merchant")
@@ -152,8 +164,10 @@ def parse_transaction_message(msg):
     if not re.search(r"\bdebited\b|\bspent\b", sms, re.I):
         return None
 
-    a = TXN_AMOUNT_OBOPAY_RE.search(sms) or TXN_AMOUNT_ICICI_RE.search(sms)
-    c = TXN_LAST4_OBOPAY_RE.search(sms) or TXN_LAST4_ICICI_RE.search(sms)
+    a = (TXN_AMOUNT_OBOPAY_RE.search(sms) or TXN_AMOUNT_ICICI_RE.search(sms)
+         or TXN_AMOUNT_PREPAID_RE.search(sms))
+    c = (TXN_LAST4_OBOPAY_RE.search(sms) or TXN_LAST4_ICICI_RE.search(sms)
+         or TXN_LAST4_PREPAID_RE.search(sms))
     if not (a and c):
         return None
 

@@ -37,6 +37,28 @@ def test_parse_icici_card_debit_time_from_footer():
     assert o.merchant_raw == "UrbanClap Techn"
 
 
+def test_parse_icici_prepaid_debit():
+    # ICICI prepaid cards use a THIRD SMS dialect: "Rs <amt> debited from ICICI
+    # Bank Prepaid Card <last4> on <DD-Mon-YY>. Info- <merchant>." The last-4 has
+    # no "XX" prefix and the amount sits before "debited".
+    o = parse_transaction_message(MESSAGES["icici_prepaid_debit_valid"])
+    assert o is not None
+    assert o.amount == 1020.06
+    assert o.card_last4 == "6620"                  # "Prepaid Card 6620" (no XX)
+    assert o.ts.date() == date(2026, 7, 24)
+    assert (o.ts.hour, o.ts.minute) == (18, 3)     # from footer clock
+    assert o.merchant_raw == "PORTER"              # after "Info-"
+
+
+def test_prepaid_amount_not_confused_by_available_balance():
+    # "The Available Balance is Rs 28,978.59" must never be picked up; the amount
+    # is anchored to the trailing "debited".
+    assert parse_transaction_message(
+        MESSAGES["icici_prepaid_debit_valid"]).amount == 1020.06
+    assert parse_transaction_message(
+        MESSAGES["icici_prepaid_debit_no_xx_last4"]).amount == 132.0
+
+
 def test_credit_is_not_parsed():
     assert parse_transaction_message(MESSAGES["credit_ignored"]) is None
 
@@ -64,4 +86,5 @@ def test_run_level_filters_keep_only_valid_debits():
         if not o or o.ts.date() < TRANSACTION_FLOOR_DATE:
             continue
         kept.append(o.card_last4)
-    assert sorted(kept) == ["0978", "9005"]        # upi + icici card only
+    # upi (0978) + icici credit card (9005) + icici prepaid cards (6570, 6620)
+    assert sorted(kept) == ["0978", "6570", "6620", "9005"]

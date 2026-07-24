@@ -36,6 +36,42 @@
     ]
   },
   {
+    "_case": "icici_prepaid_debit_valid",
+    "ts": "1753360426.000600",
+    "blocks": [
+      {"type": "header", "text": {"type": "plain_text", "text": ":money_with_wings: Debit  Rs 1,020.06  •  I&H 6620", "emoji": true}},
+      {"type": "section", "text": {"type": "mrkdwn", "text": "*Raw SMS:*\n```Dear Customer, Rs 1,020.06 debited from ICICI Bank Prepaid Card 6620 on 24-Jul-26. Info- PORTER. The Available Balance is Rs 28,978.59 . Call 022 50405238 for dispute or SMS BLOCK 6620 to 9215676766.```"}},
+      {"type": "section", "fields": [
+        {"type": "mrkdwn", "text": "*Account/Card:*\n6620"},
+        {"type": "mrkdwn", "text": "*Amount:*\nRs 1,020.06"},
+        {"type": "mrkdwn", "text": "*Type:*\nDebit"},
+        {"type": "mrkdwn", "text": "*Merchant:*\nPORTER"},
+        {"type": "mrkdwn", "text": "*Date:*\n24-Jul-26"}
+      ]},
+      {"type": "context", "elements": [
+        {"type": "mrkdwn", "text": ":iphone: Ishita & Harsh   •   :email: AX-ICICIT-S   •   :clock3: 2026-07-24 18:03:46"}
+      ]}
+    ]
+  },
+  {
+    "_case": "icici_prepaid_debit_no_xx_last4",
+    "ts": "1753326490.000700",
+    "blocks": [
+      {"type": "header", "text": {"type": "plain_text", "text": ":money_with_wings: Debit  Rs 132.00  •  K&P 6570", "emoji": true}},
+      {"type": "section", "text": {"type": "mrkdwn", "text": "*Raw SMS:*\n```Dear Customer, Rs 132.00 debited from ICICI Bank Prepaid Card 6570 on 24-Jul-26. Info- Zepto. The Available Balance is Rs 618.37 . Call 022 50405238 for dispute or SMS BLOCK 6570 to 9215676766.```"}},
+      {"type": "section", "fields": [
+        {"type": "mrkdwn", "text": "*Account/Card:*\nK&P 6570"},
+        {"type": "mrkdwn", "text": "*Amount:*\nRs 132.00"},
+        {"type": "mrkdwn", "text": "*Type:*\nDebit"},
+        {"type": "mrkdwn", "text": "*Merchant:*\nZepto"},
+        {"type": "mrkdwn", "text": "*Date:*\n24-Jul-26"}
+      ]},
+      {"type": "context", "elements": [
+        {"type": "mrkdwn", "text": ":iphone: Kabeer & Pallavi   •   :email: AD-ICICIT-S   •   :clock3: 2026-07-24 09:08:10"}
+      ]}
+    ]
+  },
+  {
     "_case": "credit_ignored",
     "ts": "1752831600.000300",
     "blocks": [

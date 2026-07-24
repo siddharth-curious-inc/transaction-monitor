@@ -98,6 +98,7 @@ MERCHANT_ALIAS = {
     "Nykaa E Ret": "Online - other vendor",
     "Nykaa Fashi": "Online - other vendor",
     "PCIPESTC": "Online - other vendor",
+    "PORTER": "Porter",
     "PORTER PG": "Porter",
     "PRODIGYPREN": "Online - other vendor",
     "PRONTO": "Pronto",
