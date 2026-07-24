@@ -6,10 +6,11 @@ from datetime import date, time, timezone, timedelta
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # --- card last-4  ->  sheet "Payment method" dropdown value -----------------
-# LEGACY (OTP source of truth). Only the three credit/prepaid cards fire OTPs.
+# LEGACY (OTP source of truth). Only these credit/prepaid cards fire OTPs.
 CARD_TO_PAYMENT_METHOD = {
     "6547": "K&D 6547",
     "6570": "K&P 6570",
+    "6620": "I&H 6620",
     "9005": "ICICI 9005",
 }
 
@@ -23,6 +24,7 @@ ACCOUNT_TO_PAYMENT_METHOD = {
     "0978": "Cashbook - Kabeer and Pallavi",   # CashBook a/c xx0978 (UPI)
     "6547": "K&D 6547",                          # ICICI INR Prepaid Card XX6547
     "6570": "K&P 6570",                          # ICICI INR Prepaid Card XX6570
+    "6620": "I&H 6620",                          # Credit Card XX6620
     "9005": "ICICI 9005",                        # ICICI Credit Card XX9005
 }
 
